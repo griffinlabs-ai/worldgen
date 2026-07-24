@@ -1,0 +1,13 @@
+layout_mode: corridor
+corridor_length: 24.0
+corridor_width: 2.5
+entrance_width: 0.9
+room_width_min: 2.5
+room_width_max: 5.0
+room_depth_min: 2.0
+room_depth_max: 4.5
+wall_height: 2.5
+wall_thickness: 0.15
+map_resolution: 0.05
+random_seed: 4242
+max_attempts: 1000

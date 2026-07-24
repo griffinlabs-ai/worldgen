@@ -12,6 +12,7 @@ import networkx as nx
 
 from random_gazebo_world.adjacency import AdjacencyGraph, build_adjacency_graph
 from random_gazebo_world.config import Config
+from random_gazebo_world.corridor import CorridorError, generate_corridor_layout
 from random_gazebo_world.export_map import (
     OccupancyMap,
     OccupancyMapError,
@@ -120,6 +121,7 @@ RETRYABLE_ERRORS = (
     WallGenerationError,
     OccupancyMapError,
     PartitionError,
+    CorridorError,
 )
 
 
@@ -217,6 +219,35 @@ def generate_valid_world(
     for attempt in range(structural_attempts):
         attempt_config = config.with_seed(config.random_seed + attempt)
         rng = create_seeded_rng(attempt_config.random_seed)
+        if attempt_config.layout_mode == "corridor":
+            try:
+                world = _attempt_corridor_world(
+                    attempt_config,
+                    rng,
+                    attempt,
+                    diagnostics,
+                )
+                diagnostics.emit_success(world)
+                return world
+            except _RetryStageError as exc:
+                last_error = exc.cause
+                diagnostics.record_rejection(
+                    stage=exc.stage,
+                    context={"attempt": attempt, "seed": attempt_config.random_seed}
+                    | exc.context,
+                    error=exc.cause,
+                )
+                continue
+            except RETRYABLE_ERRORS as exc:
+                last_error = exc
+                diagnostics.record_rejection(
+                    stage="corridor_layout",
+                    context={"attempt": attempt, "seed": attempt_config.random_seed},
+                    error=exc,
+                )
+                continue
+            continue
+
         try:
             structure = _build_structure(attempt_config, rng)
         except _RetryStageError as exc:
@@ -328,6 +359,9 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
 
 
 def validate_world_connectivity(world: GeneratedWorld) -> None:
+    if world.config.layout_mode == "corridor":
+        return
+
     room_ids = sorted(world.room_selection.room_cell_ids)
     if len(room_ids) <= 1:
         return
@@ -438,6 +472,62 @@ def _build_structure(config: Config, rng: random.Random) -> _Structure:
         adjacency=adjacency,
         room_selection=room_selection,
         candidates=candidates,
+    )
+
+
+def _attempt_corridor_world(
+    config: Config,
+    rng: random.Random,
+    attempt: int,
+    diagnostics: _RetryDiagnostics,
+) -> GeneratedWorld:
+    del diagnostics
+    base_context = {"attempt": attempt, "seed": config.random_seed}
+    layout = _run_retryable_stage(
+        "corridor_layout",
+        context=base_context,
+        operation=lambda: generate_corridor_layout(config, rng),
+    )
+    attempt_config = layout.config
+    passage_geometry = PassageGeometryLayout(
+        opening_layout=layout.opening_layout,
+        cells=(),
+    )
+    wall_layout = _run_retryable_stage(
+        "walls",
+        context=base_context,
+        operation=lambda: generate_walls(
+            layout.opening_layout,
+            layout.adjacency,
+            attempt_config,
+            passage_geometry,
+        ),
+    )
+    occupancy = _run_retryable_stage(
+        "map_task",
+        context=base_context,
+        operation=lambda: generate_occupancy_map(wall_layout, attempt_config, rng),
+    )
+    layout_document = build_layout_document(
+        layout.applied_layout,
+        layout.opening_layout,
+        wall_layout,
+        passage_geometry,
+    )
+    return GeneratedWorld(
+        config=attempt_config,
+        partition=layout.partition,
+        adjacency=layout.adjacency,
+        room_selection=layout.room_selection,
+        candidates=layout.candidates,
+        selected_graph=layout.selected_graph,
+        applied_layout=layout.applied_layout,
+        opening_layout=layout.opening_layout,
+        passage_geometry=passage_geometry,
+        wall_layout=wall_layout,
+        occupancy=occupancy,
+        layout_document=layout_document,
+        attempt=attempt,
     )
 
 

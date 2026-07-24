@@ -6,10 +6,10 @@ min_room_count: 7
 max_room_count: 15
 wall_height: 2.5
 wall_thickness: 0.15
-gate_width_min: 0.8
-gate_width_max: 1.0
-passage_width_min: 0.8
-passage_width_max: 1.2
+gate_width_min: 0.78
+gate_width_max: 0.78
+passage_width_min: 1.1
+passage_width_max: 1.1
 max_openings_per_passage_edge: 1
 max_open_edges_per_passage: 4
 extra_loop_probability: 0.2

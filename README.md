@@ -132,6 +132,21 @@ Equivalent command using the venv directly:
   --out outputs/world_42
 ```
 
+Generate a corridor-centric layout (straight central corridor with rooms on both
+sides):
+
+```bash
+uv run python -m random_gazebo_world.cli generate \
+  --config configs/corridor.yaml \
+  --seed 4242 \
+  --out outputs/corridor_4242
+```
+
+Corridor mode uses `layout_mode: corridor` and packs rooms along a fixed-length
+corridor aligned with +X. Each side is tiled independently with rescaled room
+widths and jagged per-room depths. Every room gets one fixed-width entrance
+opening into the corridor; corridor ends are closed by exterior walls.
+
 The CLI has one command today:
 
 ```bash
@@ -197,18 +212,29 @@ gz sim outputs/world_42/world_nav.sdf
 
 ## Generator Pipeline
 
-1. **Partition**: split the world into cells. The default config currently uses
-   BSP; Voronoi support remains available via configuration.
+The pipeline branches on `layout_mode`:
+
+- **`partition`** (default): BSP or Voronoi partitioning, room selection, and
+  topology-driven passages.
+- **`corridor`**: builds a corridor-centric layout directly, then reuses the
+  walls/map/SDF/metadata export stages below.
+
+Shared downstream stages:
+
+1. **Partition / corridor layout**: create cells and roles.
 2. **Adjacency graph**: build edges where cells share boundaries.
-3. **Room selection**: mark selected cells as rooms.
-4. **Candidate connections**: create gate candidates for adjacent rooms and
-   passage candidates through unused cells.
+3. **Room selection**: mark selected cells as rooms (corridor mode selects all
+   side rooms).
+4. **Candidate connections**: create gate candidates (partition mode also adds
+   passage candidates through unused cells).
 5. **Room graph selection**: choose a randomized spanning tree plus optional
-   loop edges.
+   loop edges (partition mode only).
 6. **Apply connections**: reclassify corridor cells and record logical openings.
-7. **Passage constraints**: reject topologies that violate opening constraints.
+7. **Passage constraints**: reject topologies that violate opening constraints
+   (partition mode only).
 8. **Openings**: place concrete doorway/gate widths on shared boundaries.
-9. **Passage geometry**: build straight / L / Z corridor strips in passage cells.
+9. **Passage geometry**: build straight / L / Z corridor strips in passage cells
+   (partition mode; corridor mode uses the full corridor cell polygon).
 10. **Solid fills**: convert unused space and passage leftovers into SDF geometry.
 11. **Walls**: emit thin wall segments around rooms and passage boundaries.
 12. **Map export**: rasterize walkable geometry into a Nav2 map.
@@ -231,11 +257,18 @@ axis-aligned corridor strips between openings; leftover area becomes solid.
 
 ## Configuration
 
-See [configs/default.yaml](configs/default.yaml). Important keys:
+See [configs/default.yaml](configs/default.yaml) for partition mode and
+[configs/corridor.yaml](configs/corridor.yaml) for corridor mode. Important keys:
 
 | Key | Meaning |
 | --- | --- |
-| `world_width`, `world_height` | World extent in metres. |
+| `layout_mode` | `partition` (default) or `corridor`. |
+| `world_width`, `world_height` | World extent in metres (partition mode). |
+| `corridor_length` | Exact corridor extent along +X (corridor mode). |
+| `corridor_width` | Corridor width in metres (corridor mode). |
+| `entrance_width` | Fixed room-to-corridor opening width (corridor mode). |
+| `room_width_min`, `room_width_max` | Sampled room width range before tiling (corridor mode). |
+| `room_depth_min`, `room_depth_max` | Per-room depth range (corridor mode). |
 | `partition_method` | `voronoi` or `bsp`. |
 | `min_cell_size`, `max_cell_size` | BSP cell size range. |
 | `voronoi_seed_count` | Number of Voronoi sites. |

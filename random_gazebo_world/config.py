@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from random_gazebo_world.geometry import EPS
+
 
 class ConfigError(ValueError):
     """Raised when a config file is invalid or fails validation."""
@@ -39,8 +41,27 @@ class Config:
     voronoi_min_cell_area: float = 1.0
     voronoi_max_cell_area: float = 64.0
     passage_geometry_mode: str = "curved"
+    layout_mode: str = "partition"
+    corridor_width: float | None = None
+    corridor_length: float | None = None
+    entrance_width: float | None = None
+    room_width_min: float | None = None
+    room_width_max: float | None = None
+    room_depth_min: float | None = None
+    room_depth_max: float | None = None
 
     def validate(self) -> None:
+        if self.layout_mode not in ("partition", "corridor"):
+            raise ConfigError(
+                "layout_mode must be 'partition' or 'corridor', got "
+                f"{self.layout_mode!r}"
+            )
+        if self.layout_mode == "corridor":
+            self._validate_corridor_mode()
+            return
+        self._validate_partition_mode()
+
+    def _validate_partition_mode(self) -> None:
         _require_positive(self.world_width, "world_width")
         _require_positive(self.world_height, "world_height")
         _require_positive(self.min_cell_size, "min_cell_size")
@@ -112,6 +133,45 @@ class Config:
                 f"{self.partition_method!r}"
             )
 
+    def _validate_corridor_mode(self) -> None:
+        corridor_fields = {
+            "corridor_width": self.corridor_width,
+            "corridor_length": self.corridor_length,
+            "entrance_width": self.entrance_width,
+            "room_width_min": self.room_width_min,
+            "room_width_max": self.room_width_max,
+            "room_depth_min": self.room_depth_min,
+            "room_depth_max": self.room_depth_max,
+        }
+        for name, value in corridor_fields.items():
+            if value is None:
+                raise ConfigError(f"{name} is required when layout_mode is 'corridor'")
+            _require_positive(value, name)
+
+        assert self.corridor_width is not None
+        assert self.corridor_length is not None
+        assert self.entrance_width is not None
+        assert self.room_width_min is not None
+        assert self.room_width_max is not None
+        assert self.room_depth_min is not None
+        assert self.room_depth_max is not None
+
+        _require_min_max(self.room_width_min, self.room_width_max, "room width")
+        _require_min_max(self.room_depth_min, self.room_depth_max, "room depth")
+        _require_positive(self.wall_height, "wall_height")
+        _require_positive(self.wall_thickness, "wall_thickness")
+        _require_probability(self.extra_loop_probability, "extra_loop_probability")
+        _require_positive(self.map_resolution, "map_resolution")
+        _require_positive_int(self.max_attempts, "max_attempts")
+        _require_positive(self.ground_thickness, "ground_thickness")
+
+        min_room_width = self.entrance_width + 2.0 * self.wall_thickness
+        if self.room_width_min + EPS < min_room_width:
+            raise ConfigError(
+                "room_width_min must be >= entrance_width + 2 * wall_thickness "
+                f"({min_room_width}), got {self.room_width_min}"
+            )
+
     def with_seed(self, seed: int) -> Config:
         return replace(self, random_seed=seed)
 
@@ -127,21 +187,49 @@ def load_config(path: Path | str) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError(f"Config root must be a mapping: {config_path}")
 
+    layout_mode = raw.get("layout_mode", "partition")
+    if layout_mode not in ("partition", "corridor"):
+        raise ConfigError(
+            f"layout_mode must be 'partition' or 'corridor', got {layout_mode!r}"
+        )
+
+    is_corridor = layout_mode == "corridor"
+
     try:
         config = Config(
-            world_width=_require_field(raw, "world_width"),
-            world_height=_require_field(raw, "world_height"),
-            min_cell_size=_require_field(raw, "min_cell_size"),
-            max_cell_size=_require_field(raw, "max_cell_size"),
-            min_room_count=_require_field(raw, "min_room_count"),
-            max_room_count=_require_field(raw, "max_room_count"),
+            world_width=raw.get("world_width", 1.0) if is_corridor else _require_field(raw, "world_width"),
+            world_height=raw.get("world_height", 1.0) if is_corridor else _require_field(raw, "world_height"),
+            min_cell_size=raw.get("min_cell_size", 1.0) if is_corridor else _require_field(raw, "min_cell_size"),
+            max_cell_size=raw.get("max_cell_size", 10.0) if is_corridor else _require_field(raw, "max_cell_size"),
+            min_room_count=raw.get("min_room_count", 1) if is_corridor else _require_field(raw, "min_room_count"),
+            max_room_count=raw.get("max_room_count", 100) if is_corridor else _require_field(raw, "max_room_count"),
             wall_height=_require_field(raw, "wall_height"),
             wall_thickness=_require_field(raw, "wall_thickness"),
-            gate_width_min=_require_field(raw, "gate_width_min"),
-            gate_width_max=_require_field(raw, "gate_width_max"),
-            passage_width_min=_require_field(raw, "passage_width_min"),
-            passage_width_max=_require_field(raw, "passage_width_max"),
-            extra_loop_probability=_require_field(raw, "extra_loop_probability"),
+            gate_width_min=(
+                raw.get("gate_width_min", raw.get("entrance_width", 0.8))
+                if is_corridor
+                else _require_field(raw, "gate_width_min")
+            ),
+            gate_width_max=(
+                raw.get("gate_width_max", raw.get("entrance_width", 1.2))
+                if is_corridor
+                else _require_field(raw, "gate_width_max")
+            ),
+            passage_width_min=(
+                raw.get("passage_width_min", 1.0)
+                if is_corridor
+                else _require_field(raw, "passage_width_min")
+            ),
+            passage_width_max=(
+                raw.get("passage_width_max", 1.0)
+                if is_corridor
+                else _require_field(raw, "passage_width_max")
+            ),
+            extra_loop_probability=(
+                raw.get("extra_loop_probability", 0.0)
+                if is_corridor
+                else _require_field(raw, "extra_loop_probability")
+            ),
             map_resolution=_require_field(raw, "map_resolution"),
             random_seed=_require_field(raw, "random_seed"),
             max_openings_per_passage_edge=raw.get(
@@ -157,6 +245,14 @@ def load_config(path: Path | str) -> Config:
             voronoi_min_cell_area=raw.get("voronoi_min_cell_area", 1.0),
             voronoi_max_cell_area=raw.get("voronoi_max_cell_area", 64.0),
             passage_geometry_mode=raw.get("passage_geometry_mode", "curved"),
+            layout_mode=layout_mode,
+            corridor_width=raw.get("corridor_width"),
+            corridor_length=raw.get("corridor_length"),
+            entrance_width=raw.get("entrance_width"),
+            room_width_min=raw.get("room_width_min"),
+            room_width_max=raw.get("room_width_max"),
+            room_depth_min=raw.get("room_depth_min"),
+            room_depth_max=raw.get("room_depth_max"),
         )
     except KeyError as exc:
         raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc
