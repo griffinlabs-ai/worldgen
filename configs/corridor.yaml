@@ -27,6 +27,12 @@ fixture_basin_offset_x: 0.0
 fixture_basin_offset_y: 0.0
 fixture_basin_offset_z: 0.0
 fixture_basin_offset_yaw: 0.0
+fixture_toilet_count_min: 3
+fixture_toilet_count_max: 5
+fixture_urinal_count_min: 2
+fixture_urinal_count_max: 5
+fixture_basin_count_min: 1
+fixture_basin_count_max: 3
 cubicle_door_width: 0.65
 # cubicle_wall_height: 2.0
 cubicle_wall_color: [0.36, 0.47, 0.55]

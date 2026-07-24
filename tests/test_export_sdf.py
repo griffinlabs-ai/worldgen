@@ -461,9 +461,7 @@ def test_export_world_sdf_with_textures_enabled(tmp_path: Path) -> None:
     ground_visual = world.find("./model[@name='ground']/link/visual")
     assert ground_visual is not None
     albedo_map = ground_visual.findtext("./material/pbr/metal/albedo_map")
-    assert albedo_map is not None
-    assert albedo_map.startswith("file://")
-    assert texture_path.resolve().as_posix() in albedo_map
+    assert albedo_map == "floor_texture.png"
 
     walls_link = world.find("./model[@name='walls']/link")
     assert walls_link is not None

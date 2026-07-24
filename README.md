@@ -166,8 +166,15 @@ outputs/world_42/
   layout.json        # detailed generated layout geometry
   metadata.json      # seed, config, counts, selected start/goal
   debug/             # staged SVG/PNG debug views
-  meshes/            # OBJ meshes for non-orthogonal solid fills and copied fixture assets
+  floor_texture.png  # generated floor albedo when textures_enabled (same dir as world.sdf)
+  meshes/            # OBJ meshes for non-orthogonal solid fills (when present)
 ```
+
+Fixture mesh assets are **not** copied into the output directory. Mesh fixture visuals reference
+`model://<subdir>/<file>.obj` URIs resolved from `fixture_models_dir` on the Gazebo resource path
+(`GZ_SIM_RESOURCE_PATH` / `IGN_GAZEBO_RESOURCE_PATH`). The floor texture is referenced as the bare
+filename `floor_texture.png` relative to `world.sdf`; Gazebo resolves it from the output directory
+when that directory is on the resource path or when launching from it.
 
 The main Gazebo model structure is:
 
@@ -295,6 +302,9 @@ See [configs/default.yaml](configs/default.yaml) for partition mode and
 | `fixture_toilet_offset_x/y/z/yaw` | Local mesh visual origin compensation for toilets (metres/radians in the fixture frame; default toilet x is `-0.458`). |
 | `fixture_urinal_offset_x/y/z/yaw` | Local mesh visual origin compensation for urinals (default all zero). |
 | `fixture_basin_offset_x/y/z/yaw` | Local mesh visual origin compensation for basins (default all zero). |
+| `fixture_toilet_count_min`, `fixture_toilet_count_max` | Min/max toilets per toilet cluster (defaults `2` / `5`; pitch `1.5` m). |
+| `fixture_urinal_count_min`, `fixture_urinal_count_max` | Min/max urinals per urinal cluster (defaults `2` / `5`; pitch `1.0` m). |
+| `fixture_basin_count_min`, `fixture_basin_count_max` | Min/max basins per basin cluster (defaults `1` / `3`; pitch `1.2` m). |
 | `cubicle_door_width` | Width of the front-door opening for each toilet cubicle in metres (default `0.65`). Must leave room for a front wall segment at least `wall_thickness` wide within the toilet pitch (`1.5` m). |
 | `cubicle_wall_height` | Optional cubicle partition height in metres (default: use global `wall_height`). When set, must be positive and `<= wall_height`. |
 | `cubicle_wall_color` | RGB laminate color for cubicle partition/front walls when textures are enabled (default `[0.36, 0.47, 0.55]`). |
@@ -318,14 +328,18 @@ receive skirting strips; laminate cubicle partitions do not.
 
 When `fixture_mode: restroom_clusters`, each room receives three fixture clusters
 (toilet cubicles, urinals, basin bank) placed along distinct walls when possible.
+Per-kind cluster counts come from the `fixture_<kind>_count_min/max` keys above.
+At config load, each kind's `count_min * pitch` must fit on the largest possible
+room wall: in corridor mode `max(room_width_max, room_depth_max) - 2 * wall_thickness`;
+in partition mode `max_cell_size - 2 * wall_thickness`. Otherwise validation raises
+`ConfigError` with guidance to lower the count or increase room size bounds.
 Each toilet cubicle is an enclosed mini-room with side/end partitions and a fixed-width
 front door opening (`cubicle_door_width`). Partition walls merge into the wall layout for
 map/SDF export; optional `cubicle_wall_height` lowers cubicle partitions in SDF while
-leaving room walls at `wall_height`. Fixture meshes are copied into `meshes/fixtures/` under the output directory and referenced with
-relative URIs from independent static SDF models (one model per fixture instance and
-one per counter/cabinet box). Each mesh fixture model uses the logical world pose at
-the model origin; configured per-type offsets are applied only to the mesh visual in
-the fixture's local frame. This mode is not supported with
+leaving room walls at `wall_height`. Fixture mesh visuals use `model://` URIs (see Generated
+Outputs above); `fixture_models_dir` must be on the Gazebo resource path. Each mesh fixture model
+uses the logical world pose at the model origin; configured per-type offsets are applied only to
+the mesh visual in the fixture's local frame. This mode is not supported with
 `partition_method: voronoi`.
 
 ## Debug Images

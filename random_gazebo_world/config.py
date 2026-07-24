@@ -65,6 +65,12 @@ class Config:
     fixture_basin_offset_y: float = 0.0
     fixture_basin_offset_z: float = 0.0
     fixture_basin_offset_yaw: float = 0.0
+    fixture_toilet_count_min: int = 2
+    fixture_toilet_count_max: int = 5
+    fixture_urinal_count_min: int = 2
+    fixture_urinal_count_max: int = 5
+    fixture_basin_count_min: int = 1
+    fixture_basin_count_max: int = 3
     cubicle_door_width: float = 0.65
     cubicle_wall_height: float | None = None
     cubicle_wall_color: tuple[float, float, float] = (0.36, 0.47, 0.55)
@@ -172,8 +178,10 @@ class Config:
                 "fixture_mode must be 'none' or 'restroom_clusters', got "
                 f"{self.fixture_mode!r}"
             )
+        _validate_fixture_count_settings(self)
         if self.fixture_mode == "none":
             return
+        _validate_fixture_count_feasibility(self)
         if not self.fixture_models_dir:
             raise ConfigError(
                 "fixture_models_dir is required when fixture_mode is not 'none'"
@@ -332,6 +340,12 @@ def load_config(path: Path | str) -> Config:
             fixture_basin_offset_y=raw.get("fixture_basin_offset_y", 0.0),
             fixture_basin_offset_z=raw.get("fixture_basin_offset_z", 0.0),
             fixture_basin_offset_yaw=raw.get("fixture_basin_offset_yaw", 0.0),
+            fixture_toilet_count_min=raw.get("fixture_toilet_count_min", 2),
+            fixture_toilet_count_max=raw.get("fixture_toilet_count_max", 5),
+            fixture_urinal_count_min=raw.get("fixture_urinal_count_min", 2),
+            fixture_urinal_count_max=raw.get("fixture_urinal_count_max", 5),
+            fixture_basin_count_min=raw.get("fixture_basin_count_min", 1),
+            fixture_basin_count_max=raw.get("fixture_basin_count_max", 3),
             cubicle_door_width=raw.get("cubicle_door_width", 0.65),
             cubicle_wall_height=raw.get("cubicle_wall_height"),
             cubicle_wall_color=_load_rgb(
@@ -398,6 +412,51 @@ def _require_finite_number(value: float, name: str) -> None:
     numeric = float(value)
     if not numeric == numeric or numeric in (float("inf"), float("-inf")):
         raise ConfigError(f"{name} must be a finite numeric value, got {value!r}")
+
+
+def _validate_fixture_count_settings(config: Config) -> None:
+    for kind in ("toilet", "urinal", "basin"):
+        min_name = f"fixture_{kind}_count_min"
+        max_name = f"fixture_{kind}_count_max"
+        count_min = getattr(config, min_name)
+        count_max = getattr(config, max_name)
+        _require_positive_int(count_min, min_name)
+        _require_positive_int(count_max, max_name)
+        _require_min_max(count_min, count_max, f"fixture {kind} count")
+
+
+def _max_room_wall_span(config: Config) -> float:
+    if config.layout_mode == "corridor":
+        assert config.room_width_max is not None
+        assert config.room_depth_max is not None
+        return (
+            max(config.room_width_max, config.room_depth_max)
+            - 2.0 * config.wall_thickness
+        )
+    return config.max_cell_size - 2.0 * config.wall_thickness
+
+
+def _validate_fixture_count_feasibility(config: Config) -> None:
+    from random_gazebo_world.fixtures import FIXTURE_SPECS
+
+    available = _max_room_wall_span(config)
+    if config.layout_mode == "corridor":
+        size_keys = "room_width_max or room_depth_max"
+    else:
+        size_keys = "max_cell_size"
+
+    for kind in ("toilet", "urinal", "basin"):
+        count_min = getattr(config, f"fixture_{kind}_count_min")
+        pitch = FIXTURE_SPECS[kind].pitch
+        required_span = count_min * pitch
+        if required_span > available + EPS:
+            raise ConfigError(
+                f"fixture {kind} cluster requires at least {required_span} m of wall "
+                f"(fixture_{kind}_count_min={count_min} * pitch={pitch}), but the "
+                f"largest possible room wall is at most {available} m "
+                f"({size_keys} minus 2 * wall_thickness). Lower "
+                f"fixture_{kind}_count_min or increase {size_keys}."
+            )
 
 
 def _validate_fixture_visual_offsets(config: Config) -> None:

@@ -22,6 +22,7 @@ from random_gazebo_world.fixtures import (
     FixtureError,
     box_collision_footprint,
     fixture_collision_footprint,
+    fixture_count_range_for_kind,
     generate_fixtures,
 )
 from random_gazebo_world.geometry import Cell
@@ -212,8 +213,25 @@ def test_restroom_clusters_counts_within_clamps() -> None:
     )
     layout = generate_fixtures(wall_layout, config, create_seeded_rng(99))
     for cluster in layout.clusters:
-        spec = FIXTURE_SPECS[cluster.kind]
-        assert spec.count_min <= len(cluster.instances) <= spec.count_max
+        count_min, count_max = fixture_count_range_for_kind(config, cluster.kind)
+        assert count_min <= len(cluster.instances) <= count_max
+
+
+def test_restroom_clusters_honor_configured_toilet_count() -> None:
+    if not FIXTURE_MODELS_DIR.is_dir():
+        pytest.skip("fixture models directory not available")
+    wall_layout = _large_room_wall_layout()
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(FIXTURE_MODELS_DIR),
+        fixture_toilet_count_min=2,
+        fixture_toilet_count_max=2,
+    )
+    layout = generate_fixtures(wall_layout, config, create_seeded_rng(99))
+    toilet_clusters = [cluster for cluster in layout.clusters if cluster.kind == "toilet"]
+    assert toilet_clusters
+    for cluster in toilet_clusters:
+        assert len(cluster.instances) == 2
 
 
 def test_restroom_clusters_deterministic_for_seed() -> None:
@@ -319,7 +337,7 @@ def test_restroom_clusters_raises_on_tiny_room() -> None:
         fixture_mode="restroom_clusters",
         fixture_models_dir=str(FIXTURE_MODELS_DIR),
     )
-    with pytest.raises(FixtureError):
+    with pytest.raises(FixtureError, match="toilet cluster in room 0"):
         generate_fixtures(wall_layout, config, create_seeded_rng(1))
 
 
@@ -401,9 +419,10 @@ def test_corridor_integration_with_fixtures(tmp_path: Path) -> None:
     assert (out_dir / "debug" / "12_fixtures.png").is_file()
     assert "12_fixtures" in REQUIRED_DEBUG_STAGES
 
-    mesh_root = out_dir / "meshes" / "fixtures"
-    assert mesh_root.is_dir()
-    assert any(mesh_root.rglob("*.obj"))
+    assert not (out_dir / "meshes" / "fixtures").exists()
+    sdf_text = (out_dir / "world.sdf").read_text(encoding="utf-8")
+    assert "model://" in sdf_text
+    assert "<albedo_map>floor_texture.png</albedo_map>" in sdf_text
 
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["counts"]["fixture_instances"] > 0
@@ -429,7 +448,7 @@ def test_corridor_integration_with_fixtures(tmp_path: Path) -> None:
         assert not contains_xy(footprint, [goal[0]], [goal[1]])
 
 
-def test_export_sdf_copies_fixture_meshes(tmp_path: Path) -> None:
+def test_export_sdf_uses_model_uri_fixture_meshes(tmp_path: Path) -> None:
     if not FIXTURE_MODELS_DIR.is_dir():
         pytest.skip("fixture models directory not available")
     wall_layout = _large_room_wall_layout()
@@ -446,9 +465,17 @@ def test_export_sdf_copies_fixture_meshes(tmp_path: Path) -> None:
     )
     sdf_path = tmp_path / "world.sdf"
     export_world_sdf(merged, config, sdf_path, fixture_layout=layout)
-    for relpath in layout.mesh_relpaths:
-        copied = tmp_path / "meshes" / "fixtures" / relpath
-        assert copied.is_file()
+    assert not (tmp_path / "meshes" / "fixtures").exists()
+
+    root = ET.parse(sdf_path).getroot()
+    world = root.find("world")
+    assert world is not None
+    for instance in layout.instances:
+        model_name = _sanitize_sdf_name(instance.name)
+        uri = world.findtext(
+            f"./model[@name='{model_name}']/link/visual/geometry/mesh/uri"
+        )
+        assert uri == f"model://{instance.mesh_relpath}"
 
 
 def test_layout_document_serializes_fixtures(tmp_path: Path) -> None:

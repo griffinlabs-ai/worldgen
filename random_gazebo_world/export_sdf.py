@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +26,7 @@ from random_gazebo_world.solid_geometry import (
 )
 from random_gazebo_world.textures import (
     FLOOR_ROUGHNESS,
+    FLOOR_TEXTURE_NAME,
     SKIRT_COLOR,
     SOLID_PAINT,
     WALL_PAINT,
@@ -173,16 +173,14 @@ def export_world_sdf(
             config,
             wall_layout.opening_layout.applied_layout,
         )
-        floor_texture_uri = _mesh_uri(texture_path)
+        floor_texture_uri = FLOOR_TEXTURE_NAME
     solid_plan = _plan_solid_geometry(
         wall_layout,
         config,
         output_path=output_path,
         mode=solid_export_mode,
     )
-    fixture_mesh_uris = _copy_fixture_meshes(
-        fixture_layout, config, output_path.parent
-    )
+    fixture_mesh_uris = _build_fixture_mesh_uris(fixture_layout, config)
     tree = _build_sdf_tree(
         boxes,
         solid_plan,
@@ -568,7 +566,6 @@ def validate_world_sdf(
             world,
             fixture_layout,
             config,
-            sdf_path.parent,
         )
 
 
@@ -606,10 +603,9 @@ def _validate_texture_exports(
     albedo_map = visual.findtext("./material/pbr/metal/albedo_map")
     if albedo_map is None:
         raise SdfExportError("Ground visual missing PBR albedo map")
-    expected_uri = _mesh_uri(texture_path)
-    if albedo_map != expected_uri:
+    if albedo_map != FLOOR_TEXTURE_NAME:
         raise SdfExportError(
-            f"Ground albedo map mismatch: expected {expected_uri!r}, got {albedo_map!r}"
+            f"Ground albedo map mismatch: expected {FLOOR_TEXTURE_NAME!r}, got {albedo_map!r}"
         )
 
 
@@ -1308,14 +1304,13 @@ def _approx_tuple(
     return all(abs(a - b) <= eps for a, b in zip(left, right, strict=True))
 
 
-def _fixture_mesh_uri(output_dir: Path, relpath: str) -> str:
-    return f"meshes/fixtures/{relpath.replace(chr(92), '/')}"
+def _fixture_model_mesh_uri(relpath: str) -> str:
+    return f"model://{relpath.replace(chr(92), '/')}"
 
 
-def _copy_fixture_meshes(
+def _build_fixture_mesh_uris(
     fixture_layout: FixtureLayout,
     config: Config,
-    output_dir: Path,
 ) -> dict[str, str]:
     if not fixture_layout.mesh_relpaths:
         return {}
@@ -1328,13 +1323,7 @@ def _copy_fixture_meshes(
         src = models_dir / relpath
         if not src.is_file():
             raise SdfExportError(f"Fixture mesh not found: {src}")
-        dst = output_dir / "meshes" / "fixtures" / relpath
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        mtl_src = src.with_suffix(".mtl")
-        if mtl_src.is_file():
-            shutil.copy2(mtl_src, dst.with_suffix(".mtl"))
-        uris[relpath] = _fixture_mesh_uri(output_dir, relpath)
+        uris[relpath] = _fixture_model_mesh_uri(relpath)
     return uris
 
 
@@ -1487,7 +1476,6 @@ def _validate_fixtures_model(
     world: ET.Element,
     fixture_layout: FixtureLayout,
     config: Config,
-    output_dir: Path,
 ) -> None:
     aggregate = next(
         (model for model in world.findall("model") if model.get("name") == "fixtures"),
@@ -1584,7 +1572,17 @@ def _validate_fixtures_model(
                 raise SdfExportError(
                     f"Fixture model {model_name!r} mesh visual missing URI"
                 )
-            mesh_path = output_dir / uri
+            expected_uri = _fixture_model_mesh_uri(instance.mesh_relpath)
+            if uri != expected_uri:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} mesh URI mismatch: "
+                    f"expected {expected_uri!r}, got {uri!r}"
+                )
+            if not config.fixture_models_dir:
+                raise SdfExportError(
+                    "fixture_models_dir is required to validate fixture meshes"
+                )
+            mesh_path = Path(config.fixture_models_dir) / instance.mesh_relpath
             if not mesh_path.is_file():
                 raise SdfExportError(f"Fixture mesh file not found: {mesh_path}")
 
@@ -1671,4 +1669,3 @@ def _validate_fixtures_model(
                 f"Box fixture model {model_name!r} collision size mismatch"
             )
 
-    del config

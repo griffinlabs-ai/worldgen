@@ -105,6 +105,14 @@ class FixtureInstance:
     visual_offset: FixtureVisualOffset
 
 
+def fixture_count_range_for_kind(config: Config, kind: FixtureKind) -> tuple[int, int]:
+    if kind == "toilet":
+        return config.fixture_toilet_count_min, config.fixture_toilet_count_max
+    if kind == "urinal":
+        return config.fixture_urinal_count_min, config.fixture_urinal_count_max
+    return config.fixture_basin_count_min, config.fixture_basin_count_max
+
+
 def fixture_visual_offset_for_kind(config: Config, kind: FixtureKind) -> FixtureVisualOffset:
     if kind == "toilet":
         return FixtureVisualOffset(
@@ -428,6 +436,9 @@ def _place_cluster_kind(
     )
     placed_footprints = [cluster.footprint for cluster in placed]
     entrance_zones = _entrance_clearance_zones(wall_edges, entrance_intervals)
+    count_min, count_max = fixture_count_range_for_kind(config, kind)
+    required_span = count_min * spec.pitch
+    largest_free_interval = 0.0
 
     for _attempt in range(MAX_PLACEMENT_ATTEMPTS):
         for wall in wall_order:
@@ -451,16 +462,17 @@ def _place_cluster_kind(
             free_intervals.sort(key=lambda item: item[1] - item[0], reverse=True)
             for interval_start, interval_end in free_intervals:
                 interval_len = interval_end - interval_start
+                largest_free_interval = max(largest_free_interval, interval_len)
                 max_fit = int(math.floor(interval_len / spec.pitch))
-                count = min(spec.count_max, max_fit)
-                if count < spec.count_min:
+                count = min(count_max, max_fit)
+                if count < count_min:
                     continue
                 if remaining_kinds > 0:
-                    count = spec.count_min
-                elif count > spec.count_min:
-                    count = rng.randint(spec.count_min, count)
+                    count = count_min
+                elif count > count_min:
+                    count = rng.randint(count_min, count)
                 else:
-                    count = spec.count_min
+                    count = count_min
 
                 span = count * spec.pitch
                 if span > interval_len + EPS:
@@ -531,8 +543,9 @@ def _place_cluster_kind(
         rng.shuffle(wall_order)
 
     raise FixtureError(
-        f"Could not place {kind} cluster in room {cell.id} after "
-        f"{MAX_PLACEMENT_ATTEMPTS} attempts"
+        f"Could not place {kind} cluster in room {cell.id}: required span "
+        f"{required_span} m (count_min={count_min} * pitch={spec.pitch}), "
+        f"largest free wall interval {largest_free_interval} m"
     )
 
 
