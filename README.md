@@ -286,6 +286,11 @@ See [configs/default.yaml](configs/default.yaml) for partition mode and
 | `max_selection_attempts` | Room graph selection retry cap per generation attempt. |
 | `wall_height`, `wall_thickness` | Wall dimensions in metres. |
 | `ground_thickness` | Ground slab thickness in metres. |
+| `textures_enabled` | When `true`, export procedural floor tiles, wall paint, and skirting (default `false`). |
+| `floor_tile_size` | Floor tile edge length in metres when textures are enabled (default `0.5`). |
+
+When `textures_enabled` is `true`, SDF export also writes `floor_texture.png` next to
+`world.sdf` (64 pixels per metre, seeded from `random_seed`).
 
 ## Debug Images
 

@@ -11,3 +11,5 @@ wall_thickness: 0.15
 map_resolution: 0.05
 random_seed: 4242
 max_attempts: 1000
+textures_enabled: true
+floor_tile_size: 0.5

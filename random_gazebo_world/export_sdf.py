@@ -17,6 +17,15 @@ from random_gazebo_world.solid_geometry import (
     decompose_orthogonal_polygon,
     rect_from_polygon_bounds,
 )
+from random_gazebo_world.textures import (
+    FLOOR_ROUGHNESS,
+    SKIRT_COLOR,
+    SOLID_PAINT,
+    WALL_PAINT,
+    floor_texture_path,
+    format_color,
+    generate_floor_texture,
+)
 from random_gazebo_world.walls import WallLayout, WallSegment
 
 
@@ -114,13 +123,27 @@ def export_world_sdf(
 ) -> Path:
     boxes = _wall_boxes(wall_layout, config)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    floor_texture_uri: str | None = None
+    if config.textures_enabled:
+        texture_path = generate_floor_texture(
+            floor_texture_path(output_path.parent),
+            config,
+            wall_layout.opening_layout.applied_layout,
+        )
+        floor_texture_uri = _mesh_uri(texture_path)
     solid_plan = _plan_solid_geometry(
         wall_layout,
         config,
         output_path=output_path,
         mode=solid_export_mode,
     )
-    tree = _build_sdf_tree(boxes, solid_plan, config)
+    tree = _build_sdf_tree(
+        boxes,
+        solid_plan,
+        config,
+        textures_enabled=config.textures_enabled,
+        floor_texture_uri=floor_texture_uri,
+    )
     _write_pretty_xml(tree, output_path)
     validate_world_sdf(
         output_path,
@@ -475,6 +498,50 @@ def validate_world_sdf(
 
     _validate_ground_model(world, config)
 
+    if config.textures_enabled:
+        _validate_texture_exports(sdf_path, link, len(expected_boxes), world)
+
+
+def _validate_texture_exports(
+    sdf_path: Path,
+    link: ET.Element,
+    wall_count: int,
+    world: ET.Element,
+) -> None:
+    texture_path = floor_texture_path(sdf_path.parent)
+    if not texture_path.is_file():
+        raise SdfExportError(f"Floor texture not found: {texture_path}")
+
+    skirt_visuals = [
+        item
+        for item in link.findall("visual")
+        if (item.get("name") or "").startswith("skirt_")
+    ]
+    if len(skirt_visuals) != wall_count:
+        raise SdfExportError(
+            f"Expected {wall_count} skirt visuals, got {len(skirt_visuals)}"
+        )
+
+    ground_model = next(
+        (model for model in world.findall("model") if model.get("name") == "ground"),
+        None,
+    )
+    if ground_model is None:
+        raise SdfExportError("SDF world must contain a ground model")
+
+    visual = ground_model.find("link/visual")
+    if visual is None:
+        raise SdfExportError("Ground model must contain a visual")
+
+    albedo_map = visual.findtext("./material/pbr/metal/albedo_map")
+    if albedo_map is None:
+        raise SdfExportError("Ground visual missing PBR albedo map")
+    expected_uri = _mesh_uri(texture_path)
+    if albedo_map != expected_uri:
+        raise SdfExportError(
+            f"Ground albedo map mismatch: expected {expected_uri!r}, got {albedo_map!r}"
+        )
+
 
 def _validate_solid_geometry_counts(
     sdf_path: Path,
@@ -572,31 +639,81 @@ def _build_sdf_tree(
     boxes: list[WallBox],
     solids: SolidGeometryPlan,
     config: Config,
+    *,
+    textures_enabled: bool = False,
+    floor_texture_uri: str | None = None,
 ) -> ET.ElementTree:
     sdf = ET.Element("sdf", version="1.10")
     world = ET.SubElement(sdf, "world", name="generated_world")
     _append_world_environment(world)
-    _append_ground_model(world, config)
+    _append_ground_model(
+        world,
+        config,
+        textures_enabled=textures_enabled,
+        floor_texture_uri=floor_texture_uri,
+    )
     model = ET.SubElement(world, "model", name="walls")
     static = ET.SubElement(model, "static")
     static.text = "true"
     link = ET.SubElement(model, "link", name="walls_link")
 
-    for box in boxes:
-        _append_box(link, f"{box.name}_collision", box, kind="collision")
-        _append_box(link, f"{box.name}_visual", box, kind="visual")
+    for index, box in enumerate(boxes):
+        _append_box(
+            link,
+            f"{box.name}_collision",
+            box,
+            kind="collision",
+        )
+        _append_box(
+            link,
+            f"{box.name}_visual",
+            box,
+            kind="visual",
+            material_style="wall_paint" if textures_enabled else "default",
+        )
+        if textures_enabled:
+            _append_skirt_visual(link, box, index)
 
     for box in solids.boxes:
         _append_box(link, f"{box.name}_collision", box, kind="collision")
-        _append_box(link, f"{box.name}_visual", box, kind="visual")
+        _append_box(
+            link,
+            f"{box.name}_visual",
+            box,
+            kind="visual",
+            material_style="solid_paint" if textures_enabled else "default",
+        )
 
     for polyline in solids.polylines:
-        _append_polyline(link, f"{polyline.name}_collision", polyline, kind="collision")
-        _append_polyline(link, f"{polyline.name}_visual", polyline, kind="visual")
+        _append_polyline(
+            link,
+            f"{polyline.name}_collision",
+            polyline,
+            kind="collision",
+            textures_enabled=textures_enabled,
+        )
+        _append_polyline(
+            link,
+            f"{polyline.name}_visual",
+            polyline,
+            kind="visual",
+            textures_enabled=textures_enabled,
+        )
 
     for mesh in solids.meshes:
-        _append_mesh(link, f"{mesh.name}_collision", mesh, kind="collision")
-        _append_mesh(link, f"{mesh.name}_visual", mesh, kind="visual")
+        _append_mesh(
+            link,
+            f"{mesh.name}_collision",
+            mesh,
+            kind="collision",
+        )
+        _append_mesh(
+            link,
+            f"{mesh.name}_visual",
+            mesh,
+            kind="visual",
+            textures_enabled=textures_enabled,
+        )
 
     _append_directional_light(world, SUN_LIGHT)
     _append_directional_light(world, FILL_LIGHT)
@@ -609,6 +726,7 @@ def _append_polyline(
     polyline: SolidPolyline,
     *,
     kind: str,
+    textures_enabled: bool = False,
 ) -> None:
     element = ET.SubElement(link, kind, name=name)
     pose = ET.SubElement(element, "pose")
@@ -623,7 +741,10 @@ def _append_polyline(
     height.text = f"{polyline.height:.6f}"
 
     if kind == "visual":
-        _append_visual_material(element)
+        _append_visual_material(
+            element,
+            material_style="solid_paint" if textures_enabled else "default",
+        )
 
 
 def _append_mesh(
@@ -632,6 +753,7 @@ def _append_mesh(
     mesh: SolidMesh,
     *,
     kind: str,
+    textures_enabled: bool = False,
 ) -> None:
     element = ET.SubElement(link, kind, name=name)
     pose = ET.SubElement(element, "pose")
@@ -643,17 +765,33 @@ def _append_mesh(
     uri.text = mesh.uri
 
     if kind == "visual":
-        _append_visual_material(element)
+        _append_visual_material(
+            element,
+            material_style="solid_paint" if textures_enabled else "default",
+        )
 
 
-def _append_ground_model(world: ET.Element, config: Config) -> None:
+def _append_ground_model(
+    world: ET.Element,
+    config: Config,
+    *,
+    textures_enabled: bool = False,
+    floor_texture_uri: str | None = None,
+) -> None:
     box = ground_box(config)
     model = ET.SubElement(world, "model", name="ground")
     static = ET.SubElement(model, "static")
     static.text = "true"
     link = ET.SubElement(model, "link", name="ground_link")
     _append_box(link, "ground_collision", box, kind="collision")
-    _append_box(link, "ground_visual", box, kind="visual")
+    _append_box(
+        link,
+        "ground_visual",
+        box,
+        kind="visual",
+        material_style="ground_texture" if textures_enabled else "default",
+        floor_texture_uri=floor_texture_uri,
+    )
 
 
 def _append_world_environment(world: ET.Element) -> None:
@@ -714,7 +852,40 @@ def _append_directional_light(world: ET.Element, settings: dict[str, str]) -> No
     falloff.text = "0"
 
 
-def _append_visual_material(visual: ET.Element) -> None:
+def _append_visual_material(
+    visual: ET.Element,
+    *,
+    material_style: str = "default",
+    floor_texture_uri: str | None = None,
+) -> None:
+    if material_style == "ground_texture":
+        if floor_texture_uri is None:
+            raise SdfExportError("Ground texture export requires floor_texture_uri")
+        material = ET.SubElement(visual, "material")
+        diffuse = ET.SubElement(material, "diffuse")
+        diffuse.text = "1 1 1 1"
+        specular = ET.SubElement(material, "specular")
+        specular.text = "0.1 0.1 0.1 1"
+        pbr = ET.SubElement(material, "pbr")
+        metal = ET.SubElement(pbr, "metal")
+        albedo_map = ET.SubElement(metal, "albedo_map")
+        albedo_map.text = floor_texture_uri
+        roughness = ET.SubElement(metal, "roughness")
+        roughness.text = f"{FLOOR_ROUGHNESS:.6f}"
+        return
+
+    if material_style == "wall_paint":
+        material = ET.SubElement(visual, "material")
+        diffuse = ET.SubElement(material, "diffuse")
+        diffuse.text = format_color(WALL_PAINT)
+        return
+
+    if material_style == "solid_paint":
+        material = ET.SubElement(visual, "material")
+        diffuse = ET.SubElement(material, "diffuse")
+        diffuse.text = format_color(SOLID_PAINT)
+        return
+
     material = ET.SubElement(visual, "material")
     lighting = ET.SubElement(material, "lighting")
     lighting.text = VISUAL_MATERIAL["lighting"]
@@ -744,6 +915,8 @@ def _append_box(
     box: WallBox,
     *,
     kind: str,
+    material_style: str = "default",
+    floor_texture_uri: str | None = None,
 ) -> None:
     element = ET.SubElement(link, kind, name=name)
     pose = ET.SubElement(element, "pose")
@@ -755,7 +928,35 @@ def _append_box(
     size.text = _format_size(box.size_x, box.size_y, box.size_z)
 
     if kind == "visual":
-        _append_visual_material(element)
+        _append_visual_material(
+            element,
+            material_style=material_style,
+            floor_texture_uri=floor_texture_uri,
+        )
+
+
+def _append_skirt_visual(link: ET.Element, box: WallBox, index: int) -> None:
+    if box.size_x >= box.size_y:
+        skirt_x = box.size_x
+        skirt_y = box.size_y + 0.04
+    else:
+        skirt_x = box.size_x + 0.04
+        skirt_y = box.size_y
+    skirt_z = -(box.size_z / 2.0) + 0.05
+    skirt_center_z = box.center_z + skirt_z
+
+    element = ET.SubElement(link, "visual", name=f"skirt_{index}_visual")
+    pose = ET.SubElement(element, "pose")
+    pose.text = _format_pose(box.center_x, box.center_y, skirt_center_z, box.yaw)
+
+    geometry = ET.SubElement(element, "geometry")
+    box_geometry = ET.SubElement(geometry, "box")
+    size = ET.SubElement(box_geometry, "size")
+    size.text = _format_size(skirt_x, skirt_y, 0.1)
+
+    material = ET.SubElement(element, "material")
+    diffuse = ET.SubElement(material, "diffuse")
+    diffuse.text = format_color(SKIRT_COLOR)
 
 
 def _write_pretty_xml(tree: ET.ElementTree, output_path: Path) -> None:

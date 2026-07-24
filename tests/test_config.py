@@ -104,6 +104,18 @@ def test_ground_thickness_below_zero_raises(tmp_path: Path) -> None:
         load_config(config_path)
 
 
+def test_floor_tile_size_below_zero_raises(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, ["floor_tile_size: 0"])
+    with pytest.raises(ConfigError, match="floor_tile_size"):
+        load_config(config_path)
+
+
+def test_textures_enabled_defaults_false(tmp_path: Path) -> None:
+    config = load_config(_write_config(tmp_path, []))
+    assert config.textures_enabled is False
+    assert config.floor_tile_size == pytest.approx(0.5)
+
+
 def test_max_attempts_below_one_raises(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path, ["max_attempts: 0"])
     with pytest.raises(ConfigError, match="max_attempts"):

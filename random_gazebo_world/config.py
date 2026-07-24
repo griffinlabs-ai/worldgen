@@ -49,6 +49,8 @@ class Config:
     room_width_max: float | None = None
     room_depth_min: float | None = None
     room_depth_max: float | None = None
+    textures_enabled: bool = False
+    floor_tile_size: float = 0.5
 
     def validate(self) -> None:
         if self.layout_mode not in ("partition", "corridor"):
@@ -118,6 +120,7 @@ class Config:
             self.max_selection_attempts, "max_selection_attempts"
         )
         _require_positive(self.ground_thickness, "ground_thickness")
+        _require_positive(self.floor_tile_size, "floor_tile_size")
         if self.passage_geometry_mode not in ("curved", "legacy_orthogonal"):
             raise ConfigError(
                 "passage_geometry_mode must be 'curved' or 'legacy_orthogonal', got "
@@ -164,6 +167,7 @@ class Config:
         _require_positive(self.map_resolution, "map_resolution")
         _require_positive_int(self.max_attempts, "max_attempts")
         _require_positive(self.ground_thickness, "ground_thickness")
+        _require_positive(self.floor_tile_size, "floor_tile_size")
 
         min_room_width = self.entrance_width + 2.0 * self.wall_thickness
         if self.room_width_min + EPS < min_room_width:
@@ -253,6 +257,8 @@ def load_config(path: Path | str) -> Config:
             room_width_max=raw.get("room_width_max"),
             room_depth_min=raw.get("room_depth_min"),
             room_depth_max=raw.get("room_depth_max"),
+            textures_enabled=raw.get("textures_enabled", False),
+            floor_tile_size=raw.get("floor_tile_size", 0.5),
         )
     except KeyError as exc:
         raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc

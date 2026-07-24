@@ -379,3 +379,62 @@ def test_generated_world_sdf_exports(tmp_path: Path) -> None:
     sdf_path = tmp_path / "world.sdf"
     export_world_sdf(wall_layout, config, sdf_path)
     validate_world_sdf(sdf_path, wall_layout, config)
+
+
+def test_export_world_sdf_with_textures_enabled(tmp_path: Path) -> None:
+    config = _sample_config(textures_enabled=True, random_seed=7)
+    wall_layout = _build_wall_layout({0, 1}, config, 1)
+    sdf_path = tmp_path / "world.sdf"
+    export_world_sdf(wall_layout, config, sdf_path)
+
+    texture_path = tmp_path / "floor_texture.png"
+    assert texture_path.is_file()
+
+    world = ET.parse(sdf_path).getroot().find("world")
+    assert world is not None
+
+    ground_visual = world.find("./model[@name='ground']/link/visual")
+    assert ground_visual is not None
+    albedo_map = ground_visual.findtext("./material/pbr/metal/albedo_map")
+    assert albedo_map is not None
+    assert albedo_map.startswith("file://")
+    assert texture_path.resolve().as_posix() in albedo_map
+
+    walls_link = world.find("./model[@name='walls']/link")
+    assert walls_link is not None
+    skirt_visuals = [
+        item
+        for item in walls_link.findall("visual")
+        if (item.get("name") or "").startswith("skirt_")
+    ]
+    assert len(skirt_visuals) == len(wall_layout.segments)
+
+    wall_visual = walls_link.find("./visual[@name='wall_0_visual']")
+    assert wall_visual is not None
+    assert wall_visual.findtext("./material/diffuse") == "0.880000 0.870000 0.830000 1"
+
+    validate_world_sdf(sdf_path, wall_layout, config)
+
+
+def test_export_world_sdf_textures_disabled_unchanged(tmp_path: Path) -> None:
+    config = _sample_config(textures_enabled=False)
+    wall_layout = _build_wall_layout({0, 1}, config, 1)
+    sdf_path = tmp_path / "world.sdf"
+    export_world_sdf(wall_layout, config, sdf_path)
+
+    assert not (tmp_path / "floor_texture.png").exists()
+
+    walls_model = ET.parse(sdf_path).getroot().find("./world/model[@name='walls']")
+    assert walls_model is not None
+    link = walls_model.find("link")
+    assert link is not None
+    assert not any(
+        (item.get("name") or "").startswith("skirt_") for item in link.findall("visual")
+    )
+
+    visual = link.find("visual")
+    assert visual is not None
+    material = visual.find("material")
+    assert material.find("lighting").text == "true"
+    assert material.find("pbr/metal/roughness").text == "0.85"
+    validate_world_sdf(sdf_path, wall_layout, config)
