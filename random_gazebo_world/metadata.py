@@ -13,6 +13,8 @@ from random_gazebo_world.fixtures import (
     DEFAULT_FIXTURE_VISUAL_OFFSETS,
     EMPTY_FIXTURE_LAYOUT,
     BoxFixture,
+    CubicleDoorSpan,
+    CubicleLayout,
     FixtureInstance,
     FixtureLayout,
     FixtureVisualOffset,
@@ -50,6 +52,7 @@ class LayoutDocument:
     unused_solids: tuple[Polygon, ...] = ()
     fixture_instances: tuple[FixtureInstance, ...] = ()
     fixture_boxes: tuple[BoxFixture, ...] = ()
+    fixture_cubicles: tuple[CubicleLayout, ...] = ()
 
 
 def build_layout_document(
@@ -81,6 +84,7 @@ def build_layout_document(
         unused_solids=wall_layout.unused_solids,
         fixture_instances=fixture_layout.instances,
         fixture_boxes=fixture_layout.boxes,
+        fixture_cubicles=fixture_layout.cubicles,
     )
 
 
@@ -130,6 +134,7 @@ def export_metadata_json(
             "fixtures_basin": sum(
                 1 for item in document.fixture_instances if item.kind == "basin"
             ),
+            "fixture_cubicles": len(document.fixture_cubicles),
         },
         "generation_stats": {
             "gate_connections": sum(
@@ -201,6 +206,9 @@ def layout_document_to_dict(document: LayoutDocument) -> dict[str, Any]:
                 for instance in document.fixture_instances
             ],
             "boxes": [fixture_box_to_dict(box) for box in document.fixture_boxes],
+            "cubicles": [
+                cubicle_to_dict(cubicle) for cubicle in document.fixture_cubicles
+            ],
         },
     }
 
@@ -256,6 +264,10 @@ def layout_document_from_dict(payload: dict[str, Any]) -> LayoutDocument:
         fixture_boxes=tuple(
             fixture_box_from_dict(item)
             for item in payload.get("fixtures", {}).get("boxes", [])
+        ),
+        fixture_cubicles=tuple(
+            cubicle_from_dict(item)
+            for item in payload.get("fixtures", {}).get("cubicles", [])
         ),
     )
 
@@ -367,16 +379,22 @@ def polygon_from_dict(payload: dict[str, Any]) -> Polygon:
 
 
 def wall_segment_to_dict(segment: WallSegment) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "p1": list(segment.p1),
         "p2": list(segment.p2),
     }
+    if segment.height is not None:
+        payload["height"] = segment.height
+    return payload
 
 
 def wall_segment_from_dict(payload: dict[str, Any]) -> WallSegment:
+    height_payload = payload.get("height")
+    height = float(height_payload) if height_payload is not None else None
     return WallSegment(
         p1=(float(payload["p1"][0]), float(payload["p1"][1])),
         p2=(float(payload["p2"][0]), float(payload["p2"][1])),
+        height=height,
     )
 
 
@@ -466,6 +484,43 @@ def fixture_box_from_dict(payload: dict[str, Any]) -> BoxFixture:
         size_y=float(payload["size_y"]),
         size_z=float(payload["size_z"]),
         color_key=str(payload["color_key"]),  # type: ignore[arg-type]
+    )
+
+
+def cubicle_to_dict(cubicle: CubicleLayout) -> dict[str, Any]:
+    return {
+        "index": cubicle.index,
+        "name": cubicle.name,
+        "room_id": cubicle.room_id,
+        "cluster_name": cubicle.cluster_name,
+        "polygon": polygon_to_dict(cubicle.polygon),
+        "door_span": {
+            "p1": list(cubicle.door_span.p1),
+            "p2": list(cubicle.door_span.p2),
+        },
+        "toilet_instance_name": cubicle.toilet_instance_name,
+    }
+
+
+def cubicle_from_dict(payload: dict[str, Any]) -> CubicleLayout:
+    door_span_payload = payload.get("door_span", {})
+    return CubicleLayout(
+        index=int(payload["index"]),
+        name=str(payload["name"]),
+        room_id=int(payload["room_id"]),
+        cluster_name=str(payload["cluster_name"]),
+        polygon=polygon_from_dict(payload.get("polygon", {})),
+        door_span=CubicleDoorSpan(
+            p1=(
+                float(door_span_payload["p1"][0]),
+                float(door_span_payload["p1"][1]),
+            ),
+            p2=(
+                float(door_span_payload["p2"][0]),
+                float(door_span_payload["p2"][1]),
+            ),
+        ),
+        toilet_instance_name=str(payload["toilet_instance_name"]),
     )
 
 

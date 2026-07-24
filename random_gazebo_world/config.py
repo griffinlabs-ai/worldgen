@@ -65,6 +65,8 @@ class Config:
     fixture_basin_offset_y: float = 0.0
     fixture_basin_offset_z: float = 0.0
     fixture_basin_offset_yaw: float = 0.0
+    cubicle_door_width: float = 0.65
+    cubicle_wall_height: float | None = None
 
     def validate(self) -> None:
         if self.layout_mode not in ("partition", "corridor"):
@@ -138,6 +140,7 @@ class Config:
         _require_positive(self.ground_thickness, "ground_thickness")
         _require_positive(self.floor_tile_size, "floor_tile_size")
         _validate_fixture_visual_offsets(self)
+        _validate_cubicle_settings(self)
         if self.passage_geometry_mode not in ("curved", "legacy_orthogonal"):
             raise ConfigError(
                 "passage_geometry_mode must be 'curved' or 'legacy_orthogonal', got "
@@ -212,6 +215,7 @@ class Config:
         _require_positive(self.ground_thickness, "ground_thickness")
         _require_positive(self.floor_tile_size, "floor_tile_size")
         _validate_fixture_visual_offsets(self)
+        _validate_cubicle_settings(self)
 
         min_room_width = self.entrance_width + 2.0 * self.wall_thickness
         if self.room_width_min + EPS < min_room_width:
@@ -317,6 +321,8 @@ def load_config(path: Path | str) -> Config:
             fixture_basin_offset_y=raw.get("fixture_basin_offset_y", 0.0),
             fixture_basin_offset_z=raw.get("fixture_basin_offset_z", 0.0),
             fixture_basin_offset_yaw=raw.get("fixture_basin_offset_yaw", 0.0),
+            cubicle_door_width=raw.get("cubicle_door_width", 0.65),
+            cubicle_wall_height=raw.get("cubicle_wall_height"),
         )
     except KeyError as exc:
         raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc
@@ -388,3 +394,27 @@ def _validate_fixture_visual_offsets(config: Config) -> None:
         "fixture_basin_offset_yaw",
     ):
         _require_finite_number(getattr(config, name), name)
+
+
+_TOILET_CUBICLE_PITCH = 1.5
+
+
+def _validate_cubicle_settings(config: Config) -> None:
+    _require_finite_number(config.cubicle_door_width, "cubicle_door_width")
+    _require_positive(config.cubicle_door_width, "cubicle_door_width")
+    min_front_wall = config.wall_thickness
+    if config.cubicle_door_width + min_front_wall > _TOILET_CUBICLE_PITCH + EPS:
+        raise ConfigError(
+            "cubicle_door_width + wall_thickness must be <= toilet cubicle pitch "
+            f"({_TOILET_CUBICLE_PITCH}), got "
+            f"{config.cubicle_door_width + min_front_wall}"
+        )
+    if config.cubicle_wall_height is None:
+        return
+    _require_finite_number(config.cubicle_wall_height, "cubicle_wall_height")
+    _require_positive(config.cubicle_wall_height, "cubicle_wall_height")
+    if config.cubicle_wall_height > config.wall_height + EPS:
+        raise ConfigError(
+            "cubicle_wall_height must be <= wall_height "
+            f"({config.wall_height}), got {config.cubicle_wall_height}"
+        )

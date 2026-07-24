@@ -122,6 +122,40 @@ def test_textures_enabled_defaults_false(tmp_path: Path) -> None:
     assert config.fixture_toilet_offset_yaw == pytest.approx(0.0)
     assert config.fixture_urinal_offset_x == pytest.approx(0.0)
     assert config.fixture_basin_offset_yaw == pytest.approx(0.0)
+    assert config.cubicle_door_width == pytest.approx(0.65)
+    assert config.cubicle_wall_height is None
+
+
+def test_cubicle_settings_load_from_yaml(tmp_path: Path) -> None:
+    config = load_config(
+        _write_config(
+            tmp_path,
+            [
+                "cubicle_door_width: 0.7",
+                "cubicle_wall_height: 2.0",
+            ],
+        )
+    )
+    assert config.cubicle_door_width == pytest.approx(0.7)
+    assert config.cubicle_wall_height == pytest.approx(2.0)
+
+
+def test_cubicle_door_width_too_large_raises(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, ["cubicle_door_width: 1.4"])
+    with pytest.raises(ConfigError, match="cubicle_door_width"):
+        load_config(config_path)
+
+
+def test_cubicle_wall_height_above_wall_height_raises(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, ["cubicle_wall_height: 3.0"])
+    with pytest.raises(ConfigError, match="cubicle_wall_height"):
+        load_config(config_path)
+
+
+def test_cubicle_wall_height_non_positive_raises(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, ["cubicle_wall_height: 0"])
+    with pytest.raises(ConfigError, match="cubicle_wall_height"):
+        load_config(config_path)
 
 
 def test_fixture_visual_offsets_load_from_yaml(tmp_path: Path) -> None:

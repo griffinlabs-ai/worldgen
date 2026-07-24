@@ -364,7 +364,8 @@ def wall_segment_to_box(
     wall_thickness: float,
     index: int,
 ) -> WallBox:
-    center_z = wall_height / 2.0
+    effective_height = segment.height if segment.height is not None else wall_height
+    center_z = effective_height / 2.0
     length = segment.length
     orientation = segment.orientation
 
@@ -376,7 +377,7 @@ def wall_segment_to_box(
             center_z=center_z,
             size_x=wall_thickness,
             size_y=length,
-            size_z=wall_height,
+            size_z=effective_height,
         )
 
     if orientation == "horizontal":
@@ -387,7 +388,7 @@ def wall_segment_to_box(
             center_z=center_z,
             size_x=length,
             size_y=wall_thickness,
-            size_z=wall_height,
+            size_z=effective_height,
         )
 
     center_x, center_y = segment.midpoint
@@ -398,7 +399,7 @@ def wall_segment_to_box(
         center_z=center_z,
         size_x=length,
         size_y=wall_thickness,
-        size_z=wall_height,
+        size_z=effective_height,
         yaw=segment.yaw,
     )
 

@@ -19,7 +19,6 @@ BoxColorKey = Literal["counter", "cabinet"]
 ENTRANCE_ALONG_WALL_CLEARANCE = 0.5
 ENTRANCE_INTO_ROOM_CLEARANCE = 1.0
 AISLE_GAP = 0.6
-CUBICLE_FRONT_GAP = 0.8
 MAX_PLACEMENT_ATTEMPTS = 20
 FIXTURE_YAW_OFFSET = math.pi / 2.0
 
@@ -137,6 +136,23 @@ DEFAULT_FIXTURE_VISUAL_OFFSETS: dict[FixtureKind, FixtureVisualOffset] = {
 
 
 @dataclass(frozen=True)
+class CubicleDoorSpan:
+    p1: Vec2
+    p2: Vec2
+
+
+@dataclass(frozen=True)
+class CubicleLayout:
+    index: int
+    name: str
+    room_id: int
+    cluster_name: str
+    polygon: Polygon
+    door_span: CubicleDoorSpan
+    toilet_instance_name: str
+
+
+@dataclass(frozen=True)
 class BoxFixture:
     name: str
     room_id: int
@@ -161,6 +177,7 @@ class FixtureCluster:
     instances: tuple[FixtureInstance, ...]
     boxes: tuple[BoxFixture, ...]
     wall_segments: tuple[WallSegment, ...]
+    cubicles: tuple[CubicleLayout, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -176,6 +193,10 @@ class FixtureLayout:
         return tuple(box for cluster in self.clusters for box in cluster.boxes)
 
     @property
+    def cubicles(self) -> tuple[CubicleLayout, ...]:
+        return tuple(cubicle for cluster in self.clusters for cubicle in cluster.cubicles)
+
+    @property
     def extra_wall_segments(self) -> tuple[WallSegment, ...]:
         return tuple(
             segment for cluster in self.clusters for segment in cluster.wall_segments
@@ -186,11 +207,61 @@ class FixtureLayout:
         return tuple(cluster.footprint for cluster in self.clusters)
 
     @property
+    def collision_footprints(self) -> tuple[Polygon, ...]:
+        footprints: list[Polygon] = []
+        for instance in self.instances:
+            footprints.append(fixture_collision_footprint(instance))
+        for box in self.boxes:
+            footprints.append(box_collision_footprint(box))
+        return tuple(footprints)
+
+    @property
     def mesh_relpaths(self) -> frozenset[str]:
         return frozenset(instance.mesh_relpath for instance in self.instances)
 
 
 EMPTY_FIXTURE_LAYOUT = FixtureLayout(clusters=())
+
+
+def fixture_collision_footprint(instance: FixtureInstance) -> Polygon:
+    return _oriented_rectangle(
+        instance.x,
+        instance.y,
+        instance.collision_size[0],
+        instance.collision_size[1],
+        instance.yaw,
+    )
+
+
+def box_collision_footprint(box: BoxFixture) -> Polygon:
+    return _oriented_rectangle(box.x, box.y, box.size_x, box.size_y, box.yaw)
+
+
+def _oriented_rectangle(
+    center_x: float,
+    center_y: float,
+    size_x: float,
+    size_y: float,
+    yaw: float,
+) -> Polygon:
+    half_x = size_x / 2.0
+    half_y = size_y / 2.0
+    corners = (
+        (-half_x, -half_y),
+        (half_x, -half_y),
+        (half_x, half_y),
+        (-half_x, half_y),
+    )
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+    world_corners = [
+        (
+            center_x + local_x * cos_yaw - local_y * sin_yaw,
+            center_y + local_x * sin_yaw + local_y * cos_yaw,
+        )
+        for local_x, local_y in corners
+    ]
+    return Polygon(world_corners)
 
 
 @dataclass(frozen=True)
@@ -706,6 +777,7 @@ def _emit_cluster_geometry(
             yaw,
             inward,
             visual_offset,
+            config,
         )
     if kind == "urinal":
         return _emit_urinal_cluster(
@@ -748,22 +820,29 @@ def _emit_toilet_cluster(
     yaw: float,
     inward: Vec2,
     visual_offset: FixtureVisualOffset,
+    config: Config,
 ) -> FixtureCluster:
     instances: list[FixtureInstance] = []
     wall_segments: list[WallSegment] = []
-    tangent_cover = spec.pitch - CUBICLE_FRONT_GAP
+    cubicles: list[CubicleLayout] = []
+    door_width = config.cubicle_door_width
+    segment_height = config.cubicle_wall_height
+    front_wall_length = spec.pitch - door_width
+    min_segment_length = config.wall_thickness
 
     for bay in range(count):
         bay_start = span_start + bay * spec.pitch
+        bay_end = bay_start + spec.pitch
         bay_center = bay_start + spec.pitch / 2.0
         back = wall.point_at(bay_center)
         toilet_pos = (
             back[0] + inward[0] * (spec.cluster_depth - 0.5),
             back[1] + inward[1] * (spec.cluster_depth - 0.5),
         )
+        instance_name = f"{prefix}_toilet_{bay + 1}"
         instances.append(
             FixtureInstance(
-                name=f"{prefix}_toilet_{bay + 1}",
+                name=instance_name,
                 kind="toilet",
                 room_id=room_id,
                 x=toilet_pos[0],
@@ -776,24 +855,52 @@ def _emit_toilet_cluster(
             )
         )
 
-        if bay > 0:
-            partition_arc = bay_start
-            wall_segments.append(
-                _partition_segment(wall, partition_arc, spec.cluster_depth)
+        back_left = wall.point_at(bay_start)
+        back_right = wall.point_at(bay_end)
+        front_left = (
+            back_left[0] + inward[0] * spec.cluster_depth,
+            back_left[1] + inward[1] * spec.cluster_depth,
+        )
+        front_right = (
+            back_right[0] + inward[0] * spec.cluster_depth,
+            back_right[1] + inward[1] * spec.cluster_depth,
+        )
+        cubicle_polygon = Polygon([back_left, back_right, front_right, front_left])
+        door_start = _point_at_depth(wall, bay_start + front_wall_length, spec.cluster_depth)
+        door_end = front_right
+        cubicles.append(
+            CubicleLayout(
+                index=bay,
+                name=f"{prefix}_cubicle_{bay + 1}",
+                room_id=room_id,
+                cluster_name=prefix,
+                polygon=cubicle_polygon,
+                door_span=CubicleDoorSpan(p1=door_start, p2=door_end),
+                toilet_instance_name=instance_name,
             )
+        )
 
-        if tangent_cover > EPS:
-            tangent_start = wall.point_at(bay_start)
-            tangent_end = wall.point_at(bay_start + tangent_cover)
-            front = (
-                tangent_start[0] + inward[0] * spec.cluster_depth,
-                tangent_start[1] + inward[1] * spec.cluster_depth,
+        if front_wall_length + EPS >= min_segment_length:
+            front_segment = _segment_at_depth(
+                wall,
+                bay_start,
+                bay_start + front_wall_length,
+                spec.cluster_depth,
+                height=segment_height,
             )
-            front_end = (
-                tangent_end[0] + inward[0] * spec.cluster_depth,
-                tangent_end[1] + inward[1] * spec.cluster_depth,
-            )
-            wall_segments.append(WallSegment(p1=front, p2=front_end))
+            if front_segment is not None:
+                wall_segments.append(front_segment)
+
+    partition_arcs = [span_start + index * spec.pitch for index in range(count + 1)]
+    for partition_arc in partition_arcs:
+        partition = _partition_segment(
+            wall,
+            partition_arc,
+            spec.cluster_depth,
+            height=segment_height,
+        )
+        if partition.length + EPS >= min_segment_length:
+            wall_segments.append(partition)
 
     return FixtureCluster(
         room_id=room_id,
@@ -805,6 +912,30 @@ def _emit_toilet_cluster(
         instances=tuple(instances),
         boxes=(),
         wall_segments=tuple(wall_segments),
+        cubicles=tuple(cubicles),
+    )
+
+
+def _point_at_depth(wall: _RoomWallEdge, arc: float, depth: float) -> Vec2:
+    back = wall.point_at(arc)
+    inward = wall.inward
+    return (back[0] + inward[0] * depth, back[1] + inward[1] * depth)
+
+
+def _segment_at_depth(
+    wall: _RoomWallEdge,
+    arc_start: float,
+    arc_end: float,
+    depth: float,
+    *,
+    height: float | None = None,
+) -> WallSegment | None:
+    if arc_end - arc_start <= EPS:
+        return None
+    return WallSegment(
+        p1=_point_at_depth(wall, arc_start, depth),
+        p2=_point_at_depth(wall, arc_end, depth),
+        height=height,
     )
 
 
@@ -812,11 +943,13 @@ def _partition_segment(
     wall: _RoomWallEdge,
     arc: float,
     depth: float,
+    *,
+    height: float | None = None,
 ) -> WallSegment:
     back = wall.point_at(arc)
     inward = wall.inward
     front = (back[0] + inward[0] * depth, back[1] + inward[1] * depth)
-    return WallSegment(p1=back, p2=front)
+    return WallSegment(p1=back, p2=front, height=height)
 
 
 def _emit_urinal_cluster(

@@ -403,15 +403,38 @@ def render_fixtures(
         "basin": "#8ac926",
     }
     for cluster in fixture_layout.clusters:
-        _add_shapely_patch(
-            ax,
-            cluster.footprint,
-            facecolor=kind_colors.get(cluster.kind, "#888888"),
-            edgecolor="#333333",
-            linewidth=1.0,
-            alpha=0.45,
-            zorder=5,
-        )
+        if cluster.kind != "toilet":
+            _add_shapely_patch(
+                ax,
+                cluster.footprint,
+                facecolor=kind_colors.get(cluster.kind, "#888888"),
+                edgecolor="#333333",
+                linewidth=1.0,
+                alpha=0.45,
+                zorder=5,
+            )
+            continue
+
+        for cubicle in cluster.cubicles:
+            _add_shapely_patch(
+                ax,
+                cubicle.polygon,
+                facecolor="#f3ecff",
+                edgecolor="#6a4c93",
+                linewidth=1.5,
+                alpha=0.35,
+                zorder=5,
+            )
+            door = cubicle.door_span
+            ax.plot(
+                [door.p1[0], door.p2[0]],
+                [door.p1[1], door.p2[1]],
+                color="#ff7f11",
+                linewidth=3.0,
+                linestyle="-",
+                solid_capstyle="butt",
+                zorder=6,
+            )
 
     for instance in fixture_layout.instances:
         color = kind_colors.get(instance.kind, "#888888")

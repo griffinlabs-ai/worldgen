@@ -24,7 +24,7 @@ class WallSegment:
     callers and tests keep working.
     """
 
-    __slots__ = ("p1", "p2")
+    __slots__ = ("p1", "p2", "height")
 
     def __init__(
         self,
@@ -35,6 +35,7 @@ class WallSegment:
         *,
         p1: Vec2 | None = None,
         p2: Vec2 | None = None,
+        height: float | None = None,
     ) -> None:
         if p1 is not None and p2 is not None:
             point_a, point_b = p1, p2
@@ -54,6 +55,9 @@ class WallSegment:
             point_a, point_b = point_b, point_a
         object.__setattr__(self, "p1", point_a)
         object.__setattr__(self, "p2", point_b)
+        if height is not None and height <= 0:
+            raise ValueError("WallSegment height must be positive when provided")
+        object.__setattr__(self, "height", height)
 
     @property
     def length(self) -> float:
@@ -106,13 +110,19 @@ class WallSegment:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, WallSegment):
             return NotImplemented
-        return self.p1 == other.p1 and self.p2 == other.p2
+        return (
+            self.p1 == other.p1
+            and self.p2 == other.p2
+            and self.height == other.height
+        )
 
     def __hash__(self) -> int:
-        return hash((self.p1, self.p2))
+        return hash((self.p1, self.p2, self.height))
 
     def __repr__(self) -> str:
-        return f"WallSegment(p1={self.p1}, p2={self.p2})"
+        if self.height is None:
+            return f"WallSegment(p1={self.p1}, p2={self.p2})"
+        return f"WallSegment(p1={self.p1}, p2={self.p2}, height={self.height})"
 
 
 class WallLayout:

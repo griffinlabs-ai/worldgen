@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import math
 import pytest
 import xml.etree.ElementTree as ET
 from shapely import contains_xy
@@ -19,6 +20,8 @@ from random_gazebo_world.fixtures import (
     EMPTY_FIXTURE_LAYOUT,
     FIXTURE_SPECS,
     FixtureError,
+    box_collision_footprint,
+    fixture_collision_footprint,
     generate_fixtures,
 )
 from random_gazebo_world.geometry import Cell
@@ -28,6 +31,7 @@ from random_gazebo_world.metadata import (
     fixture_instance_to_dict,
     load_layout_json,
 )
+from random_gazebo_world.geometry import EPS
 from random_gazebo_world.openings import OpeningLayout, generate_openings
 from random_gazebo_world.partition import Partition
 from random_gazebo_world.pipeline import (
@@ -225,6 +229,58 @@ def test_restroom_clusters_deterministic_for_seed() -> None:
     assert first.instances == second.instances
     assert first.boxes == second.boxes
     assert first.extra_wall_segments == second.extra_wall_segments
+    assert first.cubicles == second.cubicles
+
+
+def test_toilet_cluster_emits_enclosed_cubicles() -> None:
+    if not FIXTURE_MODELS_DIR.is_dir():
+        pytest.skip("fixture models directory not available")
+    wall_layout = _large_room_wall_layout()
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(FIXTURE_MODELS_DIR),
+        cubicle_door_width=0.65,
+    )
+    layout = generate_fixtures(wall_layout, config, create_seeded_rng(99))
+    toilet_clusters = [cluster for cluster in layout.clusters if cluster.kind == "toilet"]
+    assert toilet_clusters
+    for cluster in toilet_clusters:
+        assert len(cluster.cubicles) == len(cluster.instances)
+        pitch = FIXTURE_SPECS["toilet"].pitch
+        depth = FIXTURE_SPECS["toilet"].cluster_depth
+        for cubicle in cluster.cubicles:
+            assert cubicle.polygon.area == pytest.approx(pitch * depth)
+            door_length = math.hypot(
+                cubicle.door_span.p2[0] - cubicle.door_span.p1[0],
+                cubicle.door_span.p2[1] - cubicle.door_span.p1[1],
+            )
+            assert door_length == pytest.approx(config.cubicle_door_width, abs=1e-3)
+        expected_partitions = len(cluster.instances) + 1
+        partition_segments = [
+            segment
+            for segment in cluster.wall_segments
+            if abs(segment.length - depth) <= 0.01
+        ]
+        assert len(partition_segments) == expected_partitions
+        front_segments = [
+            segment
+            for segment in cluster.wall_segments
+            if abs(segment.length - (pitch - config.cubicle_door_width)) <= 0.01
+        ]
+        assert len(front_segments) == len(cluster.instances)
+
+
+def test_cubicle_wall_segments_respect_wall_thickness() -> None:
+    if not FIXTURE_MODELS_DIR.is_dir():
+        pytest.skip("fixture models directory not available")
+    wall_layout = _large_room_wall_layout()
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(FIXTURE_MODELS_DIR),
+    )
+    layout = generate_fixtures(wall_layout, config, create_seeded_rng(99))
+    for segment in layout.extra_wall_segments:
+        assert segment.length + EPS >= config.wall_thickness
 
 
 def test_restroom_clusters_raises_on_tiny_room() -> None:
@@ -239,7 +295,7 @@ def test_restroom_clusters_raises_on_tiny_room() -> None:
         generate_fixtures(wall_layout, config, create_seeded_rng(1))
 
 
-def test_fixture_footprints_stamp_occupancy_map() -> None:
+def test_fixture_collisions_stamp_occupancy_map() -> None:
     if not FIXTURE_MODELS_DIR.is_dir():
         pytest.skip("fixture models directory not available")
     wall_layout = _large_room_wall_layout()
@@ -258,9 +314,9 @@ def test_fixture_footprints_stamp_occupancy_map() -> None:
     occupancy = generate_occupancy_map(
         merged, config, create_seeded_rng(7), fixture_layout=layout
     )
-    assert layout.footprints
-    footprint = layout.footprints[0]
-    min_x, min_y, max_x, max_y = footprint.bounds
+    assert layout.instances
+    collision = fixture_collision_footprint(layout.instances[0])
+    min_x, min_y, max_x, max_y = collision.bounds
     sample_x = (min_x + max_x) / 2.0
     sample_y = (min_y + max_y) / 2.0
     col = int((sample_x - occupancy.origin_x) / occupancy.resolution)
@@ -268,6 +324,35 @@ def test_fixture_footprints_stamp_occupancy_map() -> None:
     assert 0 <= row < occupancy.height
     assert 0 <= col < occupancy.width
     assert int(occupancy.data[row, col]) == 0
+
+
+def test_cubicle_interior_stays_free_in_occupancy_map() -> None:
+    if not FIXTURE_MODELS_DIR.is_dir():
+        pytest.skip("fixture models directory not available")
+    wall_layout = _large_room_wall_layout()
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(FIXTURE_MODELS_DIR),
+    )
+    layout = generate_fixtures(wall_layout, config, create_seeded_rng(99))
+    merged = WallLayout(
+        opening_layout=wall_layout.opening_layout,
+        segments=wall_layout.segments + layout.extra_wall_segments,
+        passage_geometry=wall_layout.passage_geometry,
+        unused_solids=wall_layout.unused_solids,
+    )
+    occupancy = generate_occupancy_map(
+        merged, config, create_seeded_rng(7), fixture_layout=layout
+    )
+    toilet_clusters = [cluster for cluster in layout.clusters if cluster.kind == "toilet"]
+    assert toilet_clusters
+    cubicle = toilet_clusters[0].cubicles[0]
+    centroid = cubicle.polygon.centroid
+    col = int((centroid.x - occupancy.origin_x) / occupancy.resolution)
+    row = occupancy.height - 1 - int((centroid.y - occupancy.origin_y) / occupancy.resolution)
+    assert 0 <= row < occupancy.height
+    assert 0 <= col < occupancy.width
+    assert int(occupancy.data[row, col]) == 254
 
 
 @pytest.mark.skipif(not FIXTURE_MODELS_DIR.is_dir(), reason="fixture models missing")
@@ -295,9 +380,11 @@ def test_corridor_integration_with_fixtures(tmp_path: Path) -> None:
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["counts"]["fixture_instances"] > 0
     assert metadata["counts"]["fixtures_toilet"] > 0
+    assert metadata["counts"]["fixture_cubicles"] > 0
 
     loaded = load_layout_json(out_dir / "layout.json")
     assert loaded.fixture_instances
+    assert loaded.fixture_cubicles
 
     validate_world_sdf(
         out_dir / "world.sdf",
@@ -353,12 +440,14 @@ def test_layout_document_serializes_fixtures(tmp_path: Path) -> None:
     )
     assert document.fixture_instances
     assert document.fixture_boxes
+    assert document.fixture_cubicles
 
     layout_path = tmp_path / "layout.json"
     export_layout_json(layout_path, document)
     loaded = load_layout_json(layout_path)
     assert loaded.fixture_instances == document.fixture_instances
     assert loaded.fixture_boxes == document.fixture_boxes
+    assert loaded.fixture_cubicles == document.fixture_cubicles
     for instance in loaded.fixture_instances:
         payload = fixture_instance_to_dict(instance)
         assert "visual_offset" in payload

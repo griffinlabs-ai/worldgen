@@ -121,7 +121,71 @@ def test_wall_segment_to_box_horizontal() -> None:
     assert box.size_z == pytest.approx(2.0)
 
 
-def test_export_world_sdf_is_well_formed_xml(tmp_path: Path) -> None:
+def test_wall_segment_to_box_uses_segment_height_override() -> None:
+    segment = WallSegment("vertical", 5.0, 0.0, 4.0, height=1.8)
+    box = wall_segment_to_box(segment, wall_height=2.5, wall_thickness=0.15, index=2)
+    assert box.center_z == pytest.approx(0.9)
+    assert box.size_z == pytest.approx(1.8)
+
+
+def test_export_world_sdf_reflects_cubicle_wall_height(tmp_path: Path) -> None:
+    fixture_models = Path(
+        "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
+    )
+    if not fixture_models.is_dir():
+        pytest.skip("fixture models directory not available")
+
+    from random_gazebo_world.fixtures import generate_fixtures
+
+    cell = Cell.from_origin_size(0, 0.0, 0.0, 8.0, 6.0)
+    partition = Partition(cells=(cell,), world_width=8.0, world_height=6.0)
+    selection = RoomSelection(partition=partition, room_cell_ids=frozenset({0}))
+    candidates = CandidateConnections(room_selection=selection, connections=())
+    selected = SelectedRoomGraph(
+        candidates=candidates,
+        connections=(),
+        spanning_tree_connections=(),
+        loop_connections=(),
+    )
+    applied = AppliedLayout(
+        partition=partition,
+        room_selection=selection,
+        selected_graph=selected,
+        passage_cell_ids=frozenset(),
+        logical_openings=(),
+    )
+    opening_layout = OpeningLayout(applied_layout=applied, openings=())
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(fixture_models),
+        cubicle_wall_height=1.8,
+    )
+    wall_layout = generate_walls(
+        opening_layout, build_adjacency_graph(partition), config
+    )
+    fixture_layout = generate_fixtures(
+        wall_layout, config, create_seeded_rng(99)
+    )
+    merged = WallLayout(
+        opening_layout=wall_layout.opening_layout,
+        segments=wall_layout.segments + fixture_layout.extra_wall_segments,
+    )
+    sdf_path = tmp_path / "world.sdf"
+    export_world_sdf(merged, config, sdf_path, fixture_layout=fixture_layout)
+
+    root = ET.parse(sdf_path).getroot()
+    world = root.find("world")
+    assert world is not None
+    walls_model = world.find("./model[@name='walls']")
+    assert walls_model is not None
+    wall_heights = [
+        float((size.text or "").split()[2])
+        for size in walls_model.findall(".//collision/geometry/box/size")
+        if size.text
+    ]
+    assert wall_heights
+    assert any(height == pytest.approx(1.8) for height in wall_heights)
+    assert any(height == pytest.approx(config.wall_height) for height in wall_heights)
     config = _sample_config()
     wall_layout = _build_wall_layout({0, 1}, config, 1)
     sdf_path = tmp_path / "world.sdf"

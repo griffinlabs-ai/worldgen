@@ -27,3 +27,5 @@ fixture_basin_offset_x: 0.0
 fixture_basin_offset_y: 0.0
 fixture_basin_offset_z: 0.0
 fixture_basin_offset_yaw: 0.0
+cubicle_door_width: 0.65
+# cubicle_wall_height: 2.0

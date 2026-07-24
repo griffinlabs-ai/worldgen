@@ -295,18 +295,23 @@ See [configs/default.yaml](configs/default.yaml) for partition mode and
 | `fixture_toilet_offset_x/y/z/yaw` | Local mesh visual origin compensation for toilets (metres/radians in the fixture frame; default toilet x is `-0.458`). |
 | `fixture_urinal_offset_x/y/z/yaw` | Local mesh visual origin compensation for urinals (default all zero). |
 | `fixture_basin_offset_x/y/z/yaw` | Local mesh visual origin compensation for basins (default all zero). |
+| `cubicle_door_width` | Width of the front-door opening for each toilet cubicle in metres (default `0.65`). Must leave room for a front wall segment at least `wall_thickness` wide within the toilet pitch (`1.5` m). |
+| `cubicle_wall_height` | Optional cubicle partition height in metres (default: use global `wall_height`). When set, must be positive and `<= wall_height`. |
 
 Per-type fixture offsets affect only mesh visual placement in SDF export. They do not
-change fixture logical world poses, collision boxes, footprint stamping, cluster layout,
-or map occupancy.
+change fixture logical world poses or collision boxes. Map occupancy is stamped from
+fixture/box collision footprints (not whole cluster footprints). Cubicle interiors stay
+navigable except where partition walls and fixtures occupy space.
 
 When `textures_enabled` is `true`, SDF export also writes `floor_texture.png` next to
 `world.sdf` (64 pixels per metre, seeded from `random_seed`).
 
 When `fixture_mode: restroom_clusters`, each room receives three fixture clusters
 (toilet cubicles, urinals, basin bank) placed along distinct walls when possible.
-Cubicle partitions are merged into the wall layout for map/SDF export. Fixture meshes
-are copied into `meshes/fixtures/` under the output directory and referenced with
+Each toilet cubicle is an enclosed mini-room with side/end partitions and a fixed-width
+front door opening (`cubicle_door_width`). Partition walls merge into the wall layout for
+map/SDF export; optional `cubicle_wall_height` lowers cubicle partitions in SDF while
+leaving room walls at `wall_height`. Fixture meshes are copied into `meshes/fixtures/` under the output directory and referenced with
 relative URIs from independent static SDF models (one model per fixture instance and
 one per counter/cabinet box). Each mesh fixture model uses the logical world pose at
 the model origin; configured per-type offsets are applied only to the mesh visual in
@@ -330,7 +335,7 @@ The generator writes staged debug images under `debug/`:
 | `09_occupancy_map_preview` | Nav2 map preview |
 | `10_final_floorplan` | Composite floorplan |
 | `11_passage_geometry` | Corridor strips and solid leftovers |
-| `12_fixtures` | Restroom cluster footprints and fixture markers (empty overlay when fixtures disabled) |
+| `12_fixtures` | Restroom clusters with cubicle outlines, door spans, and fixture markers (empty overlay when fixtures disabled) |
 
 ## Tests
 
