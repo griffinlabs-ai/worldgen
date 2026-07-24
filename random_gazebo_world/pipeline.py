@@ -13,6 +13,7 @@ import networkx as nx
 from random_gazebo_world.adjacency import AdjacencyGraph, build_adjacency_graph
 from random_gazebo_world.config import Config
 from random_gazebo_world.corridor import CorridorError, generate_corridor_layout
+from random_gazebo_world.fixtures import FixtureError, FixtureLayout, generate_fixtures
 from random_gazebo_world.export_map import (
     OccupancyMap,
     OccupancyMapError,
@@ -61,6 +62,7 @@ from random_gazebo_world.visualize import (
     render_partition,
     render_passage_cells,
     render_passage_geometry,
+    render_fixtures,
     render_selected_room_graph,
     render_selected_rooms,
     render_wall_segments,
@@ -89,6 +91,7 @@ REQUIRED_DEBUG_STAGES = (
     "09_occupancy_map_preview",
     "10_final_floorplan",
     "11_passage_geometry",
+    "12_fixtures",
 )
 
 
@@ -122,6 +125,7 @@ RETRYABLE_ERRORS = (
     OccupancyMapError,
     PartitionError,
     CorridorError,
+    FixtureError,
 )
 
 
@@ -137,6 +141,7 @@ class GeneratedWorld:
     opening_layout: OpeningLayout
     passage_geometry: PassageGeometryLayout
     wall_layout: WallLayout
+    fixture_layout: FixtureLayout
     occupancy: OccupancyMap
     layout_document: LayoutDocument
     attempt: int
@@ -351,9 +356,19 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
     render_openings(world.opening_layout, debug_dir / "07_openings")
     render_wall_segments(world.wall_layout, debug_dir / "08_wall_segments")
     write_occupancy_map_files(world.occupancy, out_dir)
-    export_world_sdf(world.wall_layout, world.config, out_dir / "world.sdf")
+    export_world_sdf(
+        world.wall_layout,
+        world.config,
+        out_dir / "world.sdf",
+        fixture_layout=world.fixture_layout,
+    )
     render_final_floorplan(world.wall_layout, debug_dir / "10_final_floorplan")
     render_passage_geometry(world.wall_layout, debug_dir / "11_passage_geometry")
+    render_fixtures(
+        world.wall_layout,
+        world.fixture_layout,
+        debug_dir / "12_fixtures",
+    )
 
     _validate_output_tree(out_dir)
 
@@ -503,16 +518,25 @@ def _attempt_corridor_world(
             passage_geometry,
         ),
     )
+    fixture_layout = _run_retryable_stage(
+        "fixtures",
+        context=base_context,
+        operation=lambda: generate_fixtures(wall_layout, attempt_config, rng),
+    )
+    wall_layout = _merge_fixture_walls(wall_layout, fixture_layout)
     occupancy = _run_retryable_stage(
         "map_task",
         context=base_context,
-        operation=lambda: generate_occupancy_map(wall_layout, attempt_config, rng),
+        operation=lambda: generate_occupancy_map(
+            wall_layout, attempt_config, rng, fixture_layout=fixture_layout
+        ),
     )
     layout_document = build_layout_document(
         layout.applied_layout,
         layout.opening_layout,
         wall_layout,
         passage_geometry,
+        fixture_layout=fixture_layout,
     )
     return GeneratedWorld(
         config=attempt_config,
@@ -525,6 +549,7 @@ def _attempt_corridor_world(
         opening_layout=layout.opening_layout,
         passage_geometry=passage_geometry,
         wall_layout=wall_layout,
+        fixture_layout=fixture_layout,
         occupancy=occupancy,
         layout_document=layout_document,
         attempt=attempt,
@@ -582,13 +607,25 @@ def _attempt_selection(
         context=base_context,
         operation=lambda: generate_walls(opening_layout, adjacency, config, passage_geometry),
     )
+    fixture_layout = _run_retryable_stage(
+        "fixtures",
+        context=base_context,
+        operation=lambda: generate_fixtures(wall_layout, config, rng),
+    )
+    wall_layout = _merge_fixture_walls(wall_layout, fixture_layout)
     occupancy = _run_retryable_stage(
         "map_task",
         context=base_context,
-        operation=lambda: generate_occupancy_map(wall_layout, config, rng),
+        operation=lambda: generate_occupancy_map(
+            wall_layout, config, rng, fixture_layout=fixture_layout
+        ),
     )
     layout_document = build_layout_document(
-        applied_layout, opening_layout, wall_layout, passage_geometry
+        applied_layout,
+        opening_layout,
+        wall_layout,
+        passage_geometry,
+        fixture_layout=fixture_layout,
     )
 
     world = GeneratedWorld(
@@ -602,6 +639,7 @@ def _attempt_selection(
         opening_layout=opening_layout,
         passage_geometry=passage_geometry,
         wall_layout=wall_layout,
+        fixture_layout=fixture_layout,
         occupancy=occupancy,
         layout_document=layout_document,
         attempt=attempt,
@@ -612,6 +650,20 @@ def _attempt_selection(
         operation=lambda: validate_world_connectivity(world),
     )
     return world
+
+
+def _merge_fixture_walls(
+    wall_layout: WallLayout,
+    fixture_layout: FixtureLayout,
+) -> WallLayout:
+    if not fixture_layout.extra_wall_segments:
+        return wall_layout
+    return WallLayout(
+        opening_layout=wall_layout.opening_layout,
+        segments=wall_layout.segments + fixture_layout.extra_wall_segments,
+        passage_geometry=wall_layout.passage_geometry,
+        unused_solids=wall_layout.unused_solids,
+    )
 
 
 def _validate_output_tree(out_dir: Path) -> None:

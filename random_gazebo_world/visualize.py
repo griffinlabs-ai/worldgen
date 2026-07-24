@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as PolygonPatch
 from shapely.geometry.base import BaseGeometry
 
-from random_gazebo_world.adjacency import AdjacencyGraph
+from random_gazebo_world.fixtures import FixtureLayout
 from random_gazebo_world.geometry import Cell, SharedWall
 from random_gazebo_world.openings import OpeningLayout, opening_line
 from random_gazebo_world.partition import Partition
@@ -364,6 +365,96 @@ def render_passage_geometry(
         start, end = wall_segment_line(segment)
         ax.plot([start[0], end[0]], [start[1], end[1]], color="#111111",
                 linewidth=2.0, solid_capstyle="butt", zorder=5)
+
+    _setup_axes(ax, partition.world_width, partition.world_height, title)
+    fig.tight_layout()
+    _save_figure(fig, output_base)
+
+
+def render_fixtures(
+    wall_layout: WallLayout,
+    fixture_layout: FixtureLayout,
+    output_base: Path,
+    title: str = "Fixtures",
+) -> None:
+    layout = wall_layout.opening_layout.applied_layout
+    partition = layout.partition
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    for cell in partition.cells:
+        role = layout.role_for(cell.id)
+        if role.value == "room":
+            facecolor = "#eef8f0"
+        elif role.value == "passage":
+            facecolor = "#eef7fb"
+        else:
+            facecolor = "#f5f5f5"
+        _add_cell_patch(ax, cell, facecolor=facecolor, edgecolor="#cccccc",
+                        linewidth=0.5, alpha=0.9)
+
+    for segment in wall_layout.segments:
+        start, end = wall_segment_line(segment)
+        ax.plot([start[0], end[0]], [start[1], end[1]], color="#111111",
+                linewidth=1.5, solid_capstyle="butt", zorder=4)
+
+    kind_colors = {
+        "toilet": "#6a4c93",
+        "urinal": "#1982c4",
+        "basin": "#8ac926",
+    }
+    for cluster in fixture_layout.clusters:
+        _add_shapely_patch(
+            ax,
+            cluster.footprint,
+            facecolor=kind_colors.get(cluster.kind, "#888888"),
+            edgecolor="#333333",
+            linewidth=1.0,
+            alpha=0.45,
+            zorder=5,
+        )
+
+    for instance in fixture_layout.instances:
+        color = kind_colors.get(instance.kind, "#888888")
+        dx = 0.15 * math.cos(instance.yaw)
+        dy = 0.15 * math.sin(instance.yaw)
+        ax.plot(
+            [instance.x, instance.x + dx],
+            [instance.y, instance.y + dy],
+            color=color,
+            linewidth=2.0,
+            zorder=6,
+        )
+        ax.scatter([instance.x], [instance.y], color=color, s=30, zorder=7)
+
+    for box in fixture_layout.boxes:
+        half_x = box.size_x / 2.0
+        half_y = box.size_y / 2.0
+        corners = [
+            (-half_x, -half_y),
+            (half_x, -half_y),
+            (half_x, half_y),
+            (-half_x, half_y),
+        ]
+        cos_yaw = math.cos(box.yaw)
+        sin_yaw = math.sin(box.yaw)
+        world_corners = [
+            (
+                box.x + local_x * cos_yaw - local_y * sin_yaw,
+                box.y + local_x * sin_yaw + local_y * cos_yaw,
+            )
+            for local_x, local_y in corners
+        ]
+        ax.add_patch(
+            PolygonPatch(
+                world_corners,
+                closed=True,
+                facecolor="#b5651d" if box.color_key == "cabinet" else "#888888",
+                edgecolor="#333333",
+                linewidth=0.8,
+                alpha=0.6,
+                zorder=6,
+            )
+        )
 
     _setup_axes(ax, partition.world_width, partition.world_height, title)
     fig.tight_layout()

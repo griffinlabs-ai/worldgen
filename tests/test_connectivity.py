@@ -10,6 +10,7 @@ import pytest
 from random_gazebo_world.adjacency import build_adjacency_graph
 from random_gazebo_world.config import Config
 from random_gazebo_world.export_map import OccupancyMap
+from random_gazebo_world.fixtures import EMPTY_FIXTURE_LAYOUT
 from random_gazebo_world.geometry import Cell
 from random_gazebo_world.metadata import build_layout_document, load_layout_json
 from random_gazebo_world.openings import OpeningLayout
@@ -107,6 +108,7 @@ def _broken_world() -> GeneratedWorld:
         opening_layout=opening_layout,
         passage_geometry=passage_geometry,
         wall_layout=wall_layout,
+        fixture_layout=EMPTY_FIXTURE_LAYOUT,
         occupancy=occupancy,
         layout_document=build_layout_document(applied, opening_layout, wall_layout),
         attempt=0,

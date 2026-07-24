@@ -51,6 +51,20 @@ class Config:
     room_depth_max: float | None = None
     textures_enabled: bool = False
     floor_tile_size: float = 0.5
+    fixture_mode: str = "none"
+    fixture_models_dir: str | None = None
+    fixture_toilet_offset_x: float = -0.458
+    fixture_toilet_offset_y: float = 0.0
+    fixture_toilet_offset_z: float = 0.0
+    fixture_toilet_offset_yaw: float = 0.0
+    fixture_urinal_offset_x: float = 0.0
+    fixture_urinal_offset_y: float = 0.0
+    fixture_urinal_offset_z: float = 0.0
+    fixture_urinal_offset_yaw: float = 0.0
+    fixture_basin_offset_x: float = 0.0
+    fixture_basin_offset_y: float = 0.0
+    fixture_basin_offset_z: float = 0.0
+    fixture_basin_offset_yaw: float = 0.0
 
     def validate(self) -> None:
         if self.layout_mode not in ("partition", "corridor"):
@@ -60,8 +74,10 @@ class Config:
             )
         if self.layout_mode == "corridor":
             self._validate_corridor_mode()
+            self._validate_fixture_settings()
             return
         self._validate_partition_mode()
+        self._validate_fixture_settings()
 
     def _validate_partition_mode(self) -> None:
         _require_positive(self.world_width, "world_width")
@@ -121,6 +137,7 @@ class Config:
         )
         _require_positive(self.ground_thickness, "ground_thickness")
         _require_positive(self.floor_tile_size, "floor_tile_size")
+        _validate_fixture_visual_offsets(self)
         if self.passage_geometry_mode not in ("curved", "legacy_orthogonal"):
             raise ConfigError(
                 "passage_geometry_mode must be 'curved' or 'legacy_orthogonal', got "
@@ -134,6 +151,32 @@ class Config:
                 "passage_geometry_mode 'legacy_orthogonal' requires "
                 "partition_method 'bsp', got "
                 f"{self.partition_method!r}"
+            )
+
+    def _validate_fixture_settings(self) -> None:
+        if self.fixture_mode not in ("none", "restroom_clusters"):
+            raise ConfigError(
+                "fixture_mode must be 'none' or 'restroom_clusters', got "
+                f"{self.fixture_mode!r}"
+            )
+        if self.fixture_mode == "none":
+            return
+        if not self.fixture_models_dir:
+            raise ConfigError(
+                "fixture_models_dir is required when fixture_mode is not 'none'"
+            )
+        models_dir = Path(self.fixture_models_dir)
+        if not models_dir.is_dir():
+            raise ConfigError(
+                f"fixture_models_dir must be an existing directory, got {models_dir}"
+            )
+        if (
+            self.fixture_mode == "restroom_clusters"
+            and self.partition_method == "voronoi"
+        ):
+            raise ConfigError(
+                "fixture_mode 'restroom_clusters' is not supported with "
+                "partition_method 'voronoi'"
             )
 
     def _validate_corridor_mode(self) -> None:
@@ -168,6 +211,7 @@ class Config:
         _require_positive_int(self.max_attempts, "max_attempts")
         _require_positive(self.ground_thickness, "ground_thickness")
         _require_positive(self.floor_tile_size, "floor_tile_size")
+        _validate_fixture_visual_offsets(self)
 
         min_room_width = self.entrance_width + 2.0 * self.wall_thickness
         if self.room_width_min + EPS < min_room_width:
@@ -259,6 +303,20 @@ def load_config(path: Path | str) -> Config:
             room_depth_max=raw.get("room_depth_max"),
             textures_enabled=raw.get("textures_enabled", False),
             floor_tile_size=raw.get("floor_tile_size", 0.5),
+            fixture_mode=raw.get("fixture_mode", "none"),
+            fixture_models_dir=raw.get("fixture_models_dir"),
+            fixture_toilet_offset_x=raw.get("fixture_toilet_offset_x", -0.458),
+            fixture_toilet_offset_y=raw.get("fixture_toilet_offset_y", 0.0),
+            fixture_toilet_offset_z=raw.get("fixture_toilet_offset_z", 0.0),
+            fixture_toilet_offset_yaw=raw.get("fixture_toilet_offset_yaw", 0.0),
+            fixture_urinal_offset_x=raw.get("fixture_urinal_offset_x", 0.0),
+            fixture_urinal_offset_y=raw.get("fixture_urinal_offset_y", 0.0),
+            fixture_urinal_offset_z=raw.get("fixture_urinal_offset_z", 0.0),
+            fixture_urinal_offset_yaw=raw.get("fixture_urinal_offset_yaw", 0.0),
+            fixture_basin_offset_x=raw.get("fixture_basin_offset_x", 0.0),
+            fixture_basin_offset_y=raw.get("fixture_basin_offset_y", 0.0),
+            fixture_basin_offset_z=raw.get("fixture_basin_offset_z", 0.0),
+            fixture_basin_offset_yaw=raw.get("fixture_basin_offset_yaw", 0.0),
         )
     except KeyError as exc:
         raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc
@@ -304,3 +362,29 @@ def _require_min_max(min_value: float, max_value: float, label: str) -> None:
 def _require_probability(value: float, name: str) -> None:
     if not 0.0 <= value <= 1.0:
         raise ConfigError(f"{name} must be between 0 and 1, got {value}")
+
+
+def _require_finite_number(value: float, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{name} must be a finite numeric value, got {value!r}")
+    numeric = float(value)
+    if not numeric == numeric or numeric in (float("inf"), float("-inf")):
+        raise ConfigError(f"{name} must be a finite numeric value, got {value!r}")
+
+
+def _validate_fixture_visual_offsets(config: Config) -> None:
+    for name in (
+        "fixture_toilet_offset_x",
+        "fixture_toilet_offset_y",
+        "fixture_toilet_offset_z",
+        "fixture_toilet_offset_yaw",
+        "fixture_urinal_offset_x",
+        "fixture_urinal_offset_y",
+        "fixture_urinal_offset_z",
+        "fixture_urinal_offset_yaw",
+        "fixture_basin_offset_x",
+        "fixture_basin_offset_y",
+        "fixture_basin_offset_z",
+        "fixture_basin_offset_yaw",
+    ):
+        _require_finite_number(getattr(config, name), name)

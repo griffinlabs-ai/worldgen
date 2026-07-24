@@ -15,6 +15,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from random_gazebo_world.config import Config
+from random_gazebo_world.fixtures import FixtureLayout
 from random_gazebo_world.topology import CellRole
 from random_gazebo_world.walls import WallLayout, WallSegment
 
@@ -121,6 +122,8 @@ def generate_occupancy_map(
     wall_layout: WallLayout,
     config: Config,
     rng,
+    *,
+    fixture_layout: FixtureLayout | None = None,
 ) -> OccupancyMap:
     layout = wall_layout.opening_layout.applied_layout
     partition = layout.partition
@@ -168,6 +171,9 @@ def generate_occupancy_map(
     half_thickness = config.wall_thickness / 2.0
     for segment in wall_layout.segments:
         occupied_geometries.append(_segment_polygon(segment, half_thickness))
+
+    if fixture_layout is not None:
+        occupied_geometries.extend(fixture_layout.footprints)
 
     if occupied_geometries:
         occupied_geom = unary_union(occupied_geometries)

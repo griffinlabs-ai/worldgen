@@ -114,6 +114,55 @@ def test_textures_enabled_defaults_false(tmp_path: Path) -> None:
     config = load_config(_write_config(tmp_path, []))
     assert config.textures_enabled is False
     assert config.floor_tile_size == pytest.approx(0.5)
+    assert config.fixture_mode == "none"
+    assert config.fixture_models_dir is None
+    assert config.fixture_toilet_offset_x == pytest.approx(-0.458)
+    assert config.fixture_toilet_offset_y == pytest.approx(0.0)
+    assert config.fixture_toilet_offset_z == pytest.approx(0.0)
+    assert config.fixture_toilet_offset_yaw == pytest.approx(0.0)
+    assert config.fixture_urinal_offset_x == pytest.approx(0.0)
+    assert config.fixture_basin_offset_yaw == pytest.approx(0.0)
+
+
+def test_fixture_visual_offsets_load_from_yaml(tmp_path: Path) -> None:
+    config = load_config(
+        _write_config(
+            tmp_path,
+            [
+                "fixture_toilet_offset_x: -0.25",
+                "fixture_toilet_offset_y: 0.1",
+                "fixture_toilet_offset_z: -0.05",
+                "fixture_toilet_offset_yaw: 0.2",
+                "fixture_urinal_offset_x: 0.01",
+                "fixture_basin_offset_yaw: -1.5",
+            ],
+        )
+    )
+    assert config.fixture_toilet_offset_x == pytest.approx(-0.25)
+    assert config.fixture_toilet_offset_y == pytest.approx(0.1)
+    assert config.fixture_toilet_offset_z == pytest.approx(-0.05)
+    assert config.fixture_toilet_offset_yaw == pytest.approx(0.2)
+    assert config.fixture_urinal_offset_x == pytest.approx(0.01)
+    assert config.fixture_basin_offset_yaw == pytest.approx(-1.5)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("fixture_toilet_offset_x", "nan"),
+        ("fixture_urinal_offset_y", "inf"),
+        ("fixture_basin_offset_z", "-inf"),
+        ("fixture_toilet_offset_yaw", "true"),
+    ],
+)
+def test_non_finite_fixture_offset_raises(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    config_path = _write_config(tmp_path, [f"{field}: {value}"])
+    with pytest.raises(ConfigError, match=field):
+        load_config(config_path)
 
 
 def test_max_attempts_below_one_raises(tmp_path: Path) -> None:

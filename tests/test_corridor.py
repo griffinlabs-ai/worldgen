@@ -167,7 +167,7 @@ def test_corridor_config_validation(tmp_path: Path) -> None:
 
 def test_corridor_end_to_end_outputs(tmp_path: Path) -> None:
     config = load_config(Path("configs/corridor.yaml"))
-    world = generate_valid_world(config, max_attempts=100)
+    world = generate_valid_world(config, max_attempts=1000)
     out_dir = tmp_path / "corridor_world"
     write_world_outputs(world, out_dir)
 

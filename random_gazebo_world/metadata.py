@@ -9,6 +9,14 @@ from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
 from random_gazebo_world.config import Config
+from random_gazebo_world.fixtures import (
+    DEFAULT_FIXTURE_VISUAL_OFFSETS,
+    EMPTY_FIXTURE_LAYOUT,
+    BoxFixture,
+    FixtureInstance,
+    FixtureLayout,
+    FixtureVisualOffset,
+)
 from random_gazebo_world.geometry import Cell, SharedWall, Vec2
 from random_gazebo_world.openings import Opening, OpeningLayout
 from random_gazebo_world.partition import Partition
@@ -40,6 +48,8 @@ class LayoutDocument:
     passage_corridors: tuple[BaseGeometry, ...] = ()
     passage_solids: tuple[Polygon, ...] = ()
     unused_solids: tuple[Polygon, ...] = ()
+    fixture_instances: tuple[FixtureInstance, ...] = ()
+    fixture_boxes: tuple[BoxFixture, ...] = ()
 
 
 def build_layout_document(
@@ -47,7 +57,11 @@ def build_layout_document(
     opening_layout: OpeningLayout,
     wall_layout: WallLayout,
     passage_geometry: PassageGeometryLayout | None = None,
+    *,
+    fixture_layout: FixtureLayout | None = None,
 ) -> LayoutDocument:
+    if fixture_layout is None:
+        fixture_layout = EMPTY_FIXTURE_LAYOUT
     cell_roles = tuple(
         (cell.id, applied_layout.role_for(cell.id).value)
         for cell in applied_layout.partition.cells
@@ -65,6 +79,8 @@ def build_layout_document(
         passage_corridors=corridors,
         passage_solids=solids,
         unused_solids=wall_layout.unused_solids,
+        fixture_instances=fixture_layout.instances,
+        fixture_boxes=fixture_layout.boxes,
     )
 
 
@@ -103,6 +119,17 @@ def export_metadata_json(
             "passage_corridors": len(document.passage_corridors),
             "passage_solids": len(document.passage_solids),
             "unused_solids": len(document.unused_solids),
+            "fixture_instances": len(document.fixture_instances),
+            "fixture_boxes": len(document.fixture_boxes),
+            "fixtures_toilet": sum(
+                1 for item in document.fixture_instances if item.kind == "toilet"
+            ),
+            "fixtures_urinal": sum(
+                1 for item in document.fixture_instances if item.kind == "urinal"
+            ),
+            "fixtures_basin": sum(
+                1 for item in document.fixture_instances if item.kind == "basin"
+            ),
         },
         "generation_stats": {
             "gate_connections": sum(
@@ -168,6 +195,13 @@ def layout_document_to_dict(document: LayoutDocument) -> dict[str, Any]:
         ],
         "passage_solids": [polygon_to_dict(geom) for geom in document.passage_solids],
         "unused_solids": [polygon_to_dict(geom) for geom in document.unused_solids],
+        "fixtures": {
+            "instances": [
+                fixture_instance_to_dict(instance)
+                for instance in document.fixture_instances
+            ],
+            "boxes": [fixture_box_to_dict(box) for box in document.fixture_boxes],
+        },
     }
 
 
@@ -214,6 +248,14 @@ def layout_document_from_dict(payload: dict[str, Any]) -> LayoutDocument:
         ),
         unused_solids=tuple(
             polygon_from_dict(item) for item in payload.get("unused_solids", [])
+        ),
+        fixture_instances=tuple(
+            fixture_instance_from_dict(item)
+            for item in payload.get("fixtures", {}).get("instances", [])
+        ),
+        fixture_boxes=tuple(
+            fixture_box_from_dict(item)
+            for item in payload.get("fixtures", {}).get("boxes", [])
         ),
     )
 
@@ -335,6 +377,95 @@ def wall_segment_from_dict(payload: dict[str, Any]) -> WallSegment:
     return WallSegment(
         p1=(float(payload["p1"][0]), float(payload["p1"][1])),
         p2=(float(payload["p2"][0]), float(payload["p2"][1])),
+    )
+
+
+def fixture_instance_to_dict(instance: FixtureInstance) -> dict[str, Any]:
+    return {
+        "name": instance.name,
+        "kind": instance.kind,
+        "room_id": instance.room_id,
+        "x": instance.x,
+        "y": instance.y,
+        "z": instance.z,
+        "yaw": instance.yaw,
+        "collision_size": list(instance.collision_size),
+        "mesh_relpath": instance.mesh_relpath,
+        "visual_offset": fixture_visual_offset_to_dict(instance.visual_offset),
+    }
+
+
+def fixture_visual_offset_to_dict(offset: FixtureVisualOffset) -> dict[str, float]:
+    return {
+        "x": offset.x,
+        "y": offset.y,
+        "z": offset.z,
+        "yaw": offset.yaw,
+    }
+
+
+def fixture_visual_offset_from_dict(
+    payload: dict[str, Any] | None,
+    *,
+    kind: str,
+) -> FixtureVisualOffset:
+    if not isinstance(payload, dict):
+        return DEFAULT_FIXTURE_VISUAL_OFFSETS[kind]  # type: ignore[index]
+    return FixtureVisualOffset(
+        x=float(payload.get("x", DEFAULT_FIXTURE_VISUAL_OFFSETS[kind].x)),  # type: ignore[index]
+        y=float(payload.get("y", DEFAULT_FIXTURE_VISUAL_OFFSETS[kind].y)),  # type: ignore[index]
+        z=float(payload.get("z", DEFAULT_FIXTURE_VISUAL_OFFSETS[kind].z)),  # type: ignore[index]
+        yaw=float(payload.get("yaw", DEFAULT_FIXTURE_VISUAL_OFFSETS[kind].yaw)),  # type: ignore[index]
+    )
+
+
+def fixture_instance_from_dict(payload: dict[str, Any]) -> FixtureInstance:
+    collision = payload["collision_size"]
+    kind = str(payload["kind"])
+    return FixtureInstance(
+        name=str(payload["name"]),
+        kind=kind,  # type: ignore[arg-type]
+        room_id=int(payload["room_id"]),
+        x=float(payload["x"]),
+        y=float(payload["y"]),
+        z=float(payload["z"]),
+        yaw=float(payload["yaw"]),
+        collision_size=(float(collision[0]), float(collision[1]), float(collision[2])),
+        mesh_relpath=str(payload["mesh_relpath"]),
+        visual_offset=fixture_visual_offset_from_dict(
+            payload.get("visual_offset"),
+            kind=kind,
+        ),
+    )
+
+
+def fixture_box_to_dict(box: BoxFixture) -> dict[str, Any]:
+    return {
+        "name": box.name,
+        "room_id": box.room_id,
+        "x": box.x,
+        "y": box.y,
+        "z": box.z,
+        "yaw": box.yaw,
+        "size_x": box.size_x,
+        "size_y": box.size_y,
+        "size_z": box.size_z,
+        "color_key": box.color_key,
+    }
+
+
+def fixture_box_from_dict(payload: dict[str, Any]) -> BoxFixture:
+    return BoxFixture(
+        name=str(payload["name"]),
+        room_id=int(payload["room_id"]),
+        x=float(payload["x"]),
+        y=float(payload["y"]),
+        z=float(payload["z"]),
+        yaw=float(payload["yaw"]),
+        size_x=float(payload["size_x"]),
+        size_y=float(payload["size_y"]),
+        size_z=float(payload["size_z"]),
+        color_key=str(payload["color_key"]),  # type: ignore[arg-type]
     )
 
 

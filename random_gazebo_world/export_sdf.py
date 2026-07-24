@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,11 @@ from shapely.geometry import Polygon
 from shapely.ops import triangulate
 
 from random_gazebo_world.config import Config
+from random_gazebo_world.fixtures import (
+    EMPTY_FIXTURE_LAYOUT,
+    FixtureLayout,
+    box_fixture_color,
+)
 from random_gazebo_world.geometry import EPS, Rect
 from random_gazebo_world.solid_geometry import (
     SolidShape,
@@ -120,7 +126,10 @@ def export_world_sdf(
     output_path: Path,
     *,
     solid_export_mode: SolidExportMode = "hybrid",
+    fixture_layout: FixtureLayout | None = None,
 ) -> Path:
+    if fixture_layout is None:
+        fixture_layout = EMPTY_FIXTURE_LAYOUT
     boxes = _wall_boxes(wall_layout, config)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     floor_texture_uri: str | None = None
@@ -137,12 +146,17 @@ def export_world_sdf(
         output_path=output_path,
         mode=solid_export_mode,
     )
+    fixture_mesh_uris = _copy_fixture_meshes(
+        fixture_layout, config, output_path.parent
+    )
     tree = _build_sdf_tree(
         boxes,
         solid_plan,
         config,
         textures_enabled=config.textures_enabled,
         floor_texture_uri=floor_texture_uri,
+        fixture_layout=fixture_layout,
+        fixture_mesh_uris=fixture_mesh_uris,
     )
     _write_pretty_xml(tree, output_path)
     validate_world_sdf(
@@ -150,6 +164,7 @@ def export_world_sdf(
         wall_layout,
         config,
         solid_export_mode=solid_export_mode,
+        fixture_layout=fixture_layout,
     )
     return output_path
 
@@ -394,7 +409,10 @@ def validate_world_sdf(
     config: Config,
     *,
     solid_export_mode: SolidExportMode = "hybrid",
+    fixture_layout: FixtureLayout | None = None,
 ) -> None:
+    if fixture_layout is None:
+        fixture_layout = EMPTY_FIXTURE_LAYOUT
     if not sdf_path.is_file():
         raise SdfExportError(f"SDF file not found: {sdf_path}")
 
@@ -500,6 +518,14 @@ def validate_world_sdf(
 
     if config.textures_enabled:
         _validate_texture_exports(sdf_path, link, len(expected_boxes), world)
+
+    if fixture_layout.instances or fixture_layout.boxes:
+        _validate_fixtures_model(
+            world,
+            fixture_layout,
+            config,
+            sdf_path.parent,
+        )
 
 
 def _validate_texture_exports(
@@ -642,7 +668,13 @@ def _build_sdf_tree(
     *,
     textures_enabled: bool = False,
     floor_texture_uri: str | None = None,
+    fixture_layout: FixtureLayout | None = None,
+    fixture_mesh_uris: dict[str, str] | None = None,
 ) -> ET.ElementTree:
+    if fixture_layout is None:
+        fixture_layout = EMPTY_FIXTURE_LAYOUT
+    if fixture_mesh_uris is None:
+        fixture_mesh_uris = {}
     sdf = ET.Element("sdf", version="1.10")
     world = ET.SubElement(sdf, "world", name="generated_world")
     _append_world_environment(world)
@@ -717,6 +749,14 @@ def _build_sdf_tree(
 
     _append_directional_light(world, SUN_LIGHT)
     _append_directional_light(world, FILL_LIGHT)
+    if fixture_layout.instances or fixture_layout.boxes:
+        _append_fixture_models(
+            world,
+            fixture_layout,
+            config,
+            fixture_mesh_uris,
+            textures_enabled=textures_enabled,
+        )
     return ET.ElementTree(sdf)
 
 
@@ -987,9 +1027,376 @@ def _parse_size(text: str) -> tuple[float, float, float]:
     return float(parts[0]), float(parts[1]), float(parts[2])
 
 
+def _parse_pose6(text: str) -> tuple[float, float, float, float, float, float]:
+    parts = text.split()
+    if len(parts) < 6:
+        raise SdfExportError(f"Invalid pose: {text!r}")
+    return tuple(float(part) for part in parts[:6])  # type: ignore[return-value]
+
+
+def _approx_pose6(
+    left: tuple[float, float, float, float, float, float],
+    right: tuple[float, float, float, float, float, float],
+    eps: float = 1e-6,
+) -> bool:
+    return all(abs(a - b) <= eps for a, b in zip(left, right, strict=True))
+
+
 def _approx_tuple(
     left: tuple[float, float, float],
     right: tuple[float, float, float],
     eps: float = 1e-6,
 ) -> bool:
     return all(abs(a - b) <= eps for a, b in zip(left, right, strict=True))
+
+
+def _fixture_mesh_uri(output_dir: Path, relpath: str) -> str:
+    return f"meshes/fixtures/{relpath.replace(chr(92), '/')}"
+
+
+def _copy_fixture_meshes(
+    fixture_layout: FixtureLayout,
+    config: Config,
+    output_dir: Path,
+) -> dict[str, str]:
+    if not fixture_layout.mesh_relpaths:
+        return {}
+    if not config.fixture_models_dir:
+        raise SdfExportError("fixture_models_dir is required to export fixture meshes")
+
+    models_dir = Path(config.fixture_models_dir)
+    uris: dict[str, str] = {}
+    for relpath in sorted(fixture_layout.mesh_relpaths):
+        src = models_dir / relpath
+        if not src.is_file():
+            raise SdfExportError(f"Fixture mesh not found: {src}")
+        dst = output_dir / "meshes" / "fixtures" / relpath
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        mtl_src = src.with_suffix(".mtl")
+        if mtl_src.is_file():
+            shutil.copy2(mtl_src, dst.with_suffix(".mtl"))
+        uris[relpath] = _fixture_mesh_uri(output_dir, relpath)
+    return uris
+
+
+def _append_fixture_models(
+    world: ET.Element,
+    fixture_layout: FixtureLayout,
+    config: Config,
+    mesh_uris: dict[str, str],
+    *,
+    textures_enabled: bool,
+) -> None:
+    del config
+    for instance in fixture_layout.instances:
+        mesh_uri = mesh_uris[instance.mesh_relpath]
+        cx, cy, cz = instance.collision_size
+        _append_mesh_fixture_model(
+            world,
+            model_name=instance.name,
+            mesh_uri=mesh_uri,
+            world_x=instance.x,
+            world_y=instance.y,
+            world_z=instance.z,
+            world_yaw=instance.yaw,
+            visual_offset=instance.visual_offset,
+            collision_size=(cx, cy, cz),
+        )
+
+    for box in fixture_layout.boxes:
+        color = box_fixture_color(box, textures_enabled)
+        _append_box_fixture_model(
+            world,
+            model_name=box.name,
+            x=box.x,
+            y=box.y,
+            z=box.z,
+            yaw=box.yaw,
+            size_x=box.size_x,
+            size_y=box.size_y,
+            size_z=box.size_z,
+            color=color,
+        )
+
+
+def _append_mesh_fixture_model(
+    world: ET.Element,
+    *,
+    model_name: str,
+    mesh_uri: str,
+    world_x: float,
+    world_y: float,
+    world_z: float,
+    world_yaw: float,
+    visual_offset,
+    collision_size: tuple[float, float, float],
+) -> None:
+    model = ET.SubElement(world, "model", name=_sanitize_sdf_name(model_name))
+    static = ET.SubElement(model, "static")
+    static.text = "true"
+    model_pose = ET.SubElement(model, "pose")
+    model_pose.text = _format_pose(world_x, world_y, world_z, world_yaw)
+    link = ET.SubElement(model, "link", name=f"{model_name}_link")
+
+    visual = ET.SubElement(link, "visual", name=f"{model_name}_visual")
+    visual_pose = ET.SubElement(visual, "pose")
+    visual_pose.text = _format_pose(
+        visual_offset.x,
+        visual_offset.y,
+        visual_offset.z,
+        visual_offset.yaw,
+    )
+    visual_geometry = ET.SubElement(visual, "geometry")
+    mesh_geometry = ET.SubElement(visual_geometry, "mesh")
+    uri = ET.SubElement(mesh_geometry, "uri")
+    uri.text = mesh_uri
+
+    cx, cy, cz = collision_size
+    collision = ET.SubElement(link, "collision", name=f"{model_name}_collision")
+    collision_pose = ET.SubElement(collision, "pose")
+    collision_pose.text = "0 0 0 0 0 0"
+    collision_geometry = ET.SubElement(collision, "geometry")
+    box_geometry = ET.SubElement(collision_geometry, "box")
+    size = ET.SubElement(box_geometry, "size")
+    size.text = _format_size(cx, cy, cz)
+
+
+def _append_box_fixture_model(
+    world: ET.Element,
+    *,
+    model_name: str,
+    x: float,
+    y: float,
+    z: float,
+    yaw: float,
+    size_x: float,
+    size_y: float,
+    size_z: float,
+    color: tuple[float, float, float],
+) -> None:
+    model = ET.SubElement(world, "model", name=_sanitize_sdf_name(model_name))
+    static = ET.SubElement(model, "static")
+    static.text = "true"
+    model_pose = ET.SubElement(model, "pose")
+    model_pose.text = _format_pose(x, y, z, yaw)
+    link = ET.SubElement(model, "link", name=f"{model_name}_link")
+
+    visual = ET.SubElement(link, "visual", name=f"{model_name}_visual")
+    visual_pose = ET.SubElement(visual, "pose")
+    visual_pose.text = "0 0 0 0 0 0"
+    visual_geometry = ET.SubElement(visual, "geometry")
+    visual_box = ET.SubElement(visual_geometry, "box")
+    visual_size = ET.SubElement(visual_box, "size")
+    visual_size.text = _format_size(size_x, size_y, size_z)
+    material = ET.SubElement(visual, "material")
+    diffuse = ET.SubElement(material, "diffuse")
+    diffuse.text = format_color(color)
+
+    collision = ET.SubElement(link, "collision", name=f"{model_name}_collision")
+    collision_pose = ET.SubElement(collision, "pose")
+    collision_pose.text = "0 0 0 0 0 0"
+    collision_geometry = ET.SubElement(collision, "geometry")
+    collision_box = ET.SubElement(collision_geometry, "box")
+    collision_size = ET.SubElement(collision_box, "size")
+    collision_size.text = _format_size(size_x, size_y, size_z)
+
+
+def _sanitize_sdf_name(name: str) -> str:
+    sanitized = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)
+    if not sanitized:
+        raise SdfExportError(f"Invalid empty SDF model name derived from {name!r}")
+    if sanitized[0].isdigit():
+        sanitized = f"fixture_{sanitized}"
+    return sanitized
+
+
+def _validate_fixtures_model(
+    world: ET.Element,
+    fixture_layout: FixtureLayout,
+    config: Config,
+    output_dir: Path,
+) -> None:
+    aggregate = next(
+        (model for model in world.findall("model") if model.get("name") == "fixtures"),
+        None,
+    )
+    if aggregate is not None:
+        raise SdfExportError("SDF world must not contain aggregate fixtures model")
+
+    instance_models = {
+        _sanitize_sdf_name(instance.name): instance
+        for instance in fixture_layout.instances
+    }
+    box_models = {
+        _sanitize_sdf_name(box.name): box for box in fixture_layout.boxes
+    }
+    expected_model_names = set(instance_models) | set(box_models)
+
+    fixture_models = [
+        model
+        for model in world.findall("model")
+        if model.get("name") in expected_model_names
+    ]
+    if len(fixture_models) != len(expected_model_names):
+        raise SdfExportError(
+            f"Expected {len(expected_model_names)} independent fixture models, got "
+            f"{len(fixture_models)}"
+        )
+
+    for model in fixture_models:
+        if not _model_is_static(model):
+            raise SdfExportError(f"Fixture model {model.get('name')!r} must be static")
+
+        link = model.find("link")
+        if link is None:
+            raise SdfExportError(
+                f"Fixture model {model.get('name')!r} must contain a link"
+            )
+
+        model_name = model.get("name")
+        assert model_name is not None
+
+        if model_name in instance_models:
+            instance = instance_models[model_name]
+            model_pose = model.find("pose")
+            if model_pose is None:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} missing model pose"
+                )
+            actual_model_pose = _parse_pose6(model_pose.text or "")
+            expected_model_pose = (
+                instance.x,
+                instance.y,
+                instance.z,
+                0.0,
+                0.0,
+                instance.yaw,
+            )
+            if not _approx_pose6(actual_model_pose, expected_model_pose):
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} world pose mismatch"
+                )
+
+            mesh_visuals = [
+                item
+                for item in link.findall("visual")
+                if item.find("./geometry/mesh") is not None
+            ]
+            if len(mesh_visuals) != 1:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} must contain one mesh visual"
+                )
+            visual = mesh_visuals[0]
+            visual_pose = visual.find("pose")
+            if visual_pose is None:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} mesh visual missing pose"
+                )
+            actual_visual_pose = _parse_pose6(visual_pose.text or "")
+            expected_visual_pose = (
+                instance.visual_offset.x,
+                instance.visual_offset.y,
+                instance.visual_offset.z,
+                0.0,
+                0.0,
+                instance.visual_offset.yaw,
+            )
+            if not _approx_pose6(actual_visual_pose, expected_visual_pose):
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} mesh visual offset mismatch"
+                )
+
+            uri = visual.findtext("./geometry/mesh/uri")
+            if uri is None:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} mesh visual missing URI"
+                )
+            mesh_path = output_dir / uri
+            if not mesh_path.is_file():
+                raise SdfExportError(f"Fixture mesh file not found: {mesh_path}")
+
+            box_collisions = [
+                item
+                for item in link.findall("collision")
+                if item.find("./geometry/box") is not None
+            ]
+            if len(box_collisions) != 1:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} must contain one box collision"
+                )
+            collision = box_collisions[0]
+            collision_pose = collision.find("pose")
+            if collision_pose is None:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} collision missing pose"
+                )
+            if (collision_pose.text or "").strip() != "0 0 0 0 0 0":
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} collision pose must be zero"
+                )
+            size = collision.find("./geometry/box/size")
+            if size is None:
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} collision missing box size"
+                )
+            actual_size = _parse_size(size.text or "")
+            if not _approx_tuple(actual_size, instance.collision_size):
+                raise SdfExportError(
+                    f"Fixture model {model_name!r} collision size mismatch"
+                )
+            continue
+
+        box = box_models[model_name]
+        model_pose = model.find("pose")
+        if model_pose is None:
+            raise SdfExportError(f"Box fixture model {model_name!r} missing model pose")
+        actual_model_pose = _parse_pose6(model_pose.text or "")
+        expected_model_pose = (box.x, box.y, box.z, 0.0, 0.0, box.yaw)
+        if not _approx_pose6(actual_model_pose, expected_model_pose):
+            raise SdfExportError(
+                f"Box fixture model {model_name!r} world pose mismatch"
+            )
+
+        box_visuals = [
+            item
+            for item in link.findall("visual")
+            if item.find("./geometry/box") is not None
+        ]
+        box_collisions = [
+            item
+            for item in link.findall("collision")
+            if item.find("./geometry/box") is not None
+        ]
+        if len(box_visuals) != 1 or len(box_collisions) != 1:
+            raise SdfExportError(
+                f"Box fixture model {model_name!r} must contain one visual and collision"
+            )
+        for element in (box_visuals[0], box_collisions[0]):
+            pose = element.find("pose")
+            if pose is None:
+                raise SdfExportError(
+                    f"Box fixture model {model_name!r} element missing pose"
+                )
+            if (pose.text or "").strip() != "0 0 0 0 0 0":
+                raise SdfExportError(
+                    f"Box fixture model {model_name!r} element pose must be zero"
+                )
+
+        visual_size = box_visuals[0].find("./geometry/box/size")
+        collision_size = box_collisions[0].find("./geometry/box/size")
+        if visual_size is None or collision_size is None:
+            raise SdfExportError(
+                f"Box fixture model {model_name!r} missing box geometry size"
+            )
+        expected_size = (box.size_x, box.size_y, box.size_z)
+        if not _approx_tuple(_parse_size(visual_size.text or ""), expected_size):
+            raise SdfExportError(
+                f"Box fixture model {model_name!r} visual size mismatch"
+            )
+        if not _approx_tuple(_parse_size(collision_size.text or ""), expected_size):
+            raise SdfExportError(
+                f"Box fixture model {model_name!r} collision size mismatch"
+            )
+
+    del config

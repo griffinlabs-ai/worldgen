@@ -166,13 +166,14 @@ outputs/world_42/
   layout.json        # detailed generated layout geometry
   metadata.json      # seed, config, counts, selected start/goal
   debug/             # staged SVG/PNG debug views
-  meshes/            # OBJ meshes for non-orthogonal solid fills, if needed
+  meshes/            # OBJ meshes for non-orthogonal solid fills and copied fixture assets
 ```
 
 The main Gazebo model structure is:
 
 - `ground`: static box slab with top at `z = 0`
 - `walls`: static model containing wall boxes plus solid fill geometry
+- one static model per restroom fixture instance and per counter/cabinet box (when `fixture_mode` is enabled)
 
 The exporter now writes static models using the SDF element form:
 
@@ -237,11 +238,12 @@ Shared downstream stages:
    (partition mode; corridor mode uses the full corridor cell polygon).
 10. **Solid fills**: convert unused space and passage leftovers into SDF geometry.
 11. **Walls**: emit thin wall segments around rooms and passage boundaries.
-12. **Map export**: rasterize walkable geometry into a Nav2 map.
-13. **Task sampling**: choose deterministic, reachable start/goal poses.
-14. **SDF export**: write ground, walls, solids, lighting, and meshes.
-15. **Metadata/debug**: write JSON outputs and staged debug images.
-16. **Validation/retry**: retry with incremented seeds when generation fails.
+12. **Fixtures** (optional): place restroom clusters and merge cubicle partitions into walls.
+13. **Map export**: rasterize walkable geometry into a Nav2 map.
+14. **Task sampling**: choose deterministic, reachable start/goal poses.
+15. **SDF export**: write ground, walls, solids, fixtures, lighting, and meshes.
+16. **Metadata/debug**: write JSON outputs and staged debug images.
+17. **Validation/retry**: retry with incremented seeds when generation fails.
 
 ## Cell Roles
 
@@ -288,9 +290,28 @@ See [configs/default.yaml](configs/default.yaml) for partition mode and
 | `ground_thickness` | Ground slab thickness in metres. |
 | `textures_enabled` | When `true`, export procedural floor tiles, wall paint, and skirting (default `false`). |
 | `floor_tile_size` | Floor tile edge length in metres when textures are enabled (default `0.5`). |
+| `fixture_mode` | `none` (default) or `restroom_clusters` for wall-hugging restroom fixture clusters. |
+| `fixture_models_dir` | Directory containing fixture mesh assets; required when `fixture_mode` is not `none`. |
+| `fixture_toilet_offset_x/y/z/yaw` | Local mesh visual origin compensation for toilets (metres/radians in the fixture frame; default toilet x is `-0.458`). |
+| `fixture_urinal_offset_x/y/z/yaw` | Local mesh visual origin compensation for urinals (default all zero). |
+| `fixture_basin_offset_x/y/z/yaw` | Local mesh visual origin compensation for basins (default all zero). |
+
+Per-type fixture offsets affect only mesh visual placement in SDF export. They do not
+change fixture logical world poses, collision boxes, footprint stamping, cluster layout,
+or map occupancy.
 
 When `textures_enabled` is `true`, SDF export also writes `floor_texture.png` next to
 `world.sdf` (64 pixels per metre, seeded from `random_seed`).
+
+When `fixture_mode: restroom_clusters`, each room receives three fixture clusters
+(toilet cubicles, urinals, basin bank) placed along distinct walls when possible.
+Cubicle partitions are merged into the wall layout for map/SDF export. Fixture meshes
+are copied into `meshes/fixtures/` under the output directory and referenced with
+relative URIs from independent static SDF models (one model per fixture instance and
+one per counter/cabinet box). Each mesh fixture model uses the logical world pose at
+the model origin; configured per-type offsets are applied only to the mesh visual in
+the fixture's local frame. This mode is not supported with
+`partition_method: voronoi`.
 
 ## Debug Images
 
@@ -309,6 +330,7 @@ The generator writes staged debug images under `debug/`:
 | `09_occupancy_map_preview` | Nav2 map preview |
 | `10_final_floorplan` | Composite floorplan |
 | `11_passage_geometry` | Corridor strips and solid leftovers |
+| `12_fixtures` | Restroom cluster footprints and fixture markers (empty overlay when fixtures disabled) |
 
 ## Tests
 
