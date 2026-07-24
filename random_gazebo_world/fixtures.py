@@ -936,6 +936,7 @@ def _segment_at_depth(
         p1=_point_at_depth(wall, arc_start, depth),
         p2=_point_at_depth(wall, arc_end, depth),
         height=height,
+        material_key="laminate",
     )
 
 
@@ -949,7 +950,7 @@ def _partition_segment(
     back = wall.point_at(arc)
     inward = wall.inward
     front = (back[0] + inward[0] * depth, back[1] + inward[1] * depth)
-    return WallSegment(p1=back, p2=front, height=height)
+    return WallSegment(p1=back, p2=front, height=height, material_key="laminate")
 
 
 def _emit_urinal_cluster(

@@ -308,7 +308,17 @@ def config_to_dict(config: Config) -> dict[str, Any]:
 
 
 def config_from_dict(payload: dict[str, Any]) -> Config:
-    config = Config(**payload)
+    normalized = dict(payload)
+    for name in (
+        "cubicle_wall_color",
+        "scene_ambient",
+        "scene_background",
+        "counter_specular",
+    ):
+        value = normalized.get(name)
+        if isinstance(value, list):
+            normalized[name] = tuple(value)
+    config = Config(**normalized)
     config.validate()
     return config
 
@@ -385,16 +395,20 @@ def wall_segment_to_dict(segment: WallSegment) -> dict[str, Any]:
     }
     if segment.height is not None:
         payload["height"] = segment.height
+    if segment.material_key is not None:
+        payload["material_key"] = segment.material_key
     return payload
 
 
 def wall_segment_from_dict(payload: dict[str, Any]) -> WallSegment:
     height_payload = payload.get("height")
     height = float(height_payload) if height_payload is not None else None
+    material_key = payload.get("material_key")
     return WallSegment(
         p1=(float(payload["p1"][0]), float(payload["p1"][1])),
         p2=(float(payload["p2"][0]), float(payload["p2"][1])),
         height=height,
+        material_key=material_key,
     )
 
 

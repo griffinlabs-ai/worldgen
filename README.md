@@ -297,6 +297,15 @@ See [configs/default.yaml](configs/default.yaml) for partition mode and
 | `fixture_basin_offset_x/y/z/yaw` | Local mesh visual origin compensation for basins (default all zero). |
 | `cubicle_door_width` | Width of the front-door opening for each toilet cubicle in metres (default `0.65`). Must leave room for a front wall segment at least `wall_thickness` wide within the toilet pitch (`1.5` m). |
 | `cubicle_wall_height` | Optional cubicle partition height in metres (default: use global `wall_height`). When set, must be positive and `<= wall_height`. |
+| `cubicle_wall_color` | RGB laminate color for cubicle partition/front walls when textures are enabled (default `[0.36, 0.47, 0.55]`). |
+| `lighting_mode` | `directional` (default) uses sun/fill lights; `point` places shadowed room lights and spaced corridor lights. |
+| `light_height` | Z height in metres for point lights when `lighting_mode: point` (default `2.2`). |
+| `corridor_light_spacing` | Spacing in metres for non-shadowed passage/corridor point lights (default `8.0`; at least one light per passage cell). |
+| `scene_ambient` | World scene ambient RGB (default `[0.28, 0.28, 0.28]`). |
+| `scene_background` | World scene background RGB (default `[0.7, 0.7, 0.7]`). |
+| `physics_profile` | `ignored` (default) keeps lightweight ignored physics; `ode` exports Ignition/Gazebo ODE plugins and solver settings. |
+| `counter_specular` | RGB specular for counter-top fixture visuals (default `[0.4, 0.4, 0.4]`). |
+| `fixture_friction_mu` | ODE friction `mu`/`mu2` for counter and cabinet collisions (default `10000.2`). |
 
 Per-type fixture offsets affect only mesh visual placement in SDF export. They do not
 change fixture logical world poses or collision boxes. Map occupancy is stamped from
@@ -304,7 +313,8 @@ fixture/box collision footprints (not whole cluster footprints). Cubicle interio
 navigable except where partition walls and fixtures occupy space.
 
 When `textures_enabled` is `true`, SDF export also writes `floor_texture.png` next to
-`world.sdf` (64 pixels per metre, seeded from `random_seed`).
+`world.sdf` (64 pixels per metre, seeded from `random_seed`). Painted perimeter walls
+receive skirting strips; laminate cubicle partitions do not.
 
 When `fixture_mode: restroom_clusters`, each room receives three fixture clusters
 (toilet cubicles, urinals, basin bank) placed along distinct walls when possible.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -7,16 +8,17 @@ from pathlib import Path
 from typing import Literal
 from xml.dom import minidom
 
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 from shapely.ops import triangulate
 
 from random_gazebo_world.config import Config
 from random_gazebo_world.fixtures import (
     EMPTY_FIXTURE_LAYOUT,
+    BoxFixture,
     FixtureLayout,
     box_fixture_color,
 )
-from random_gazebo_world.geometry import EPS, Rect
+from random_gazebo_world.geometry import EPS, Cell, Rect
 from random_gazebo_world.solid_geometry import (
     SolidShape,
     collect_tagged_solids,
@@ -32,6 +34,7 @@ from random_gazebo_world.textures import (
     format_color,
     generate_floor_texture,
 )
+from random_gazebo_world.topology import CellRole
 from random_gazebo_world.walls import WallLayout, WallSegment
 
 
@@ -43,6 +46,36 @@ SCENE_AMBIENT = "0.25 0.25 0.25 1"
 SCENE_BACKGROUND = "0.550000012 0.600000024 0.649999976 1"
 GRAVITY = "0 0 -9.8000000000000007"
 MAGNETIC_FIELD = "5.5644999999999998e-06 2.2875799999999999e-05 -4.2388400000000002e-05"
+
+IGNITION_PLUGINS: tuple[tuple[str, str], ...] = (
+    (
+        "ignition::gazebo::systems::Physics",
+        "libignition-gazebo-physics-system.so",
+    ),
+    (
+        "ignition::gazebo::systems::UserCommands",
+        "libignition-gazebo-user-commands-system.so",
+    ),
+    (
+        "ignition::gazebo::systems::SceneBroadcaster",
+        "libignition-gazebo-scene-broadcaster-system.so",
+    ),
+    (
+        "ignition::gazebo::systems::ForceTorque",
+        "libignition-gazebo-forcetorque-system.so",
+    ),
+)
+
+POINT_LIGHT = {
+    "intensity": "1.0",
+    "direction": "0 0 -1",
+    "diffuse": "0.8 0.8 0.8 1",
+    "specular": "0.2 0.2 0.2 1",
+    "range": "10",
+    "linear": "0.1",
+    "constant": "0.5",
+    "quadratic": "0.05",
+}
 
 VISUAL_MATERIAL = {
     "lighting": "true",
@@ -95,6 +128,7 @@ class WallBox:
     size_y: float
     size_z: float
     yaw: float = 0.0
+    material_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +187,7 @@ def export_world_sdf(
         boxes,
         solid_plan,
         config,
+        wall_layout,
         textures_enabled=config.textures_enabled,
         floor_texture_uri=floor_texture_uri,
         fixture_layout=fixture_layout,
@@ -378,6 +413,7 @@ def wall_segment_to_box(
             size_x=wall_thickness,
             size_y=length,
             size_z=effective_height,
+            material_key=segment.material_key,
         )
 
     if orientation == "horizontal":
@@ -389,6 +425,7 @@ def wall_segment_to_box(
             size_x=length,
             size_y=wall_thickness,
             size_z=effective_height,
+            material_key=segment.material_key,
         )
 
     center_x, center_y = segment.midpoint
@@ -401,6 +438,7 @@ def wall_segment_to_box(
         size_y=wall_thickness,
         size_z=effective_height,
         yaw=segment.yaw,
+        material_key=segment.material_key,
     )
 
 
@@ -518,7 +556,12 @@ def validate_world_sdf(
     _validate_ground_model(world, config)
 
     if config.textures_enabled:
-        _validate_texture_exports(sdf_path, link, len(expected_boxes), world)
+        painted_wall_count = sum(
+            1 for box in expected_boxes if box.material_key != "laminate"
+        )
+        _validate_texture_exports(
+            sdf_path, link, painted_wall_count, world
+        )
 
     if fixture_layout.instances or fixture_layout.boxes:
         _validate_fixtures_model(
@@ -532,7 +575,7 @@ def validate_world_sdf(
 def _validate_texture_exports(
     sdf_path: Path,
     link: ET.Element,
-    wall_count: int,
+    painted_wall_count: int,
     world: ET.Element,
 ) -> None:
     texture_path = floor_texture_path(sdf_path.parent)
@@ -544,9 +587,9 @@ def _validate_texture_exports(
         for item in link.findall("visual")
         if (item.get("name") or "").startswith("skirt_")
     ]
-    if len(skirt_visuals) != wall_count:
+    if len(skirt_visuals) != painted_wall_count:
         raise SdfExportError(
-            f"Expected {wall_count} skirt visuals, got {len(skirt_visuals)}"
+            f"Expected {painted_wall_count} skirt visuals, got {len(skirt_visuals)}"
         )
 
     ground_model = next(
@@ -666,6 +709,7 @@ def _build_sdf_tree(
     boxes: list[WallBox],
     solids: SolidGeometryPlan,
     config: Config,
+    wall_layout: WallLayout,
     *,
     textures_enabled: bool = False,
     floor_texture_uri: str | None = None,
@@ -678,7 +722,7 @@ def _build_sdf_tree(
         fixture_mesh_uris = {}
     sdf = ET.Element("sdf", version="1.10")
     world = ET.SubElement(sdf, "world", name="generated_world")
-    _append_world_environment(world)
+    _append_world_environment(world, config)
     _append_ground_model(
         world,
         config,
@@ -691,6 +735,12 @@ def _build_sdf_tree(
     link = ET.SubElement(model, "link", name="walls_link")
 
     for index, box in enumerate(boxes):
+        if textures_enabled and box.material_key == "laminate":
+            material_style = "laminate"
+        elif textures_enabled:
+            material_style = "wall_paint"
+        else:
+            material_style = "default"
         _append_box(
             link,
             f"{box.name}_collision",
@@ -702,9 +752,10 @@ def _build_sdf_tree(
             f"{box.name}_visual",
             box,
             kind="visual",
-            material_style="wall_paint" if textures_enabled else "default",
+            material_style=material_style,
+            laminate_color=config.cubicle_wall_color,
         )
-        if textures_enabled:
+        if textures_enabled and box.material_key != "laminate":
             _append_skirt_visual(link, box, index)
 
     for box in solids.boxes:
@@ -748,8 +799,11 @@ def _build_sdf_tree(
             textures_enabled=textures_enabled,
         )
 
-    _append_directional_light(world, SUN_LIGHT)
-    _append_directional_light(world, FILL_LIGHT)
+    if config.lighting_mode == "point":
+        _append_layout_point_lights(world, wall_layout, config)
+    else:
+        _append_directional_light(world, SUN_LIGHT)
+        _append_directional_light(world, FILL_LIGHT)
     if fixture_layout.instances or fixture_layout.boxes:
         _append_fixture_models(
             world,
@@ -835,20 +889,57 @@ def _append_ground_model(
     )
 
 
-def _append_world_environment(world: ET.Element) -> None:
-    physics = ET.SubElement(world, "physics", name="default_physics", type="ignored")
-    max_step_size = ET.SubElement(physics, "max_step_size")
-    max_step_size.text = "0.001"
-    real_time_factor = ET.SubElement(physics, "real_time_factor")
-    real_time_factor.text = "1"
-    real_time_update_rate = ET.SubElement(physics, "real_time_update_rate")
-    real_time_update_rate.text = "1000"
+def _append_world_environment(world: ET.Element, config: Config) -> None:
+    if config.physics_profile == "ode":
+        for plugin_name, plugin_filename in IGNITION_PLUGINS:
+            ET.SubElement(
+                world,
+                "plugin",
+                name=plugin_name,
+                filename=plugin_filename,
+            )
+        physics = ET.SubElement(world, "physics", name="default_physics", type="ode")
+        max_step_size = ET.SubElement(physics, "max_step_size")
+        max_step_size.text = "0.02"
+        real_time_factor = ET.SubElement(physics, "real_time_factor")
+        real_time_factor.text = "1"
+        real_time_update_rate = ET.SubElement(physics, "real_time_update_rate")
+        real_time_update_rate.text = "50"
+        ode = ET.SubElement(physics, "ode")
+        solver = ET.SubElement(ode, "solver")
+        solver_type = ET.SubElement(solver, "type")
+        solver_type.text = "quick"
+        iters = ET.SubElement(solver, "iters")
+        iters.text = "50"
+        sor = ET.SubElement(solver, "sor")
+        sor.text = "1.3"
+        constraints = ET.SubElement(ode, "constraints")
+        cfm = ET.SubElement(constraints, "cfm")
+        cfm.text = "0.0"
+        erp = ET.SubElement(constraints, "erp")
+        erp.text = "0.8"
+        contact_max_correcting_vel = ET.SubElement(
+            constraints, "contact_max_correcting_vel"
+        )
+        contact_max_correcting_vel.text = "100.0"
+        contact_surface_layer = ET.SubElement(constraints, "contact_surface_layer")
+        contact_surface_layer.text = "0.0001"
+    else:
+        physics = ET.SubElement(
+            world, "physics", name="default_physics", type="ignored"
+        )
+        max_step_size = ET.SubElement(physics, "max_step_size")
+        max_step_size.text = "0.001"
+        real_time_factor = ET.SubElement(physics, "real_time_factor")
+        real_time_factor.text = "1"
+        real_time_update_rate = ET.SubElement(physics, "real_time_update_rate")
+        real_time_update_rate.text = "1000"
 
     scene = ET.SubElement(world, "scene")
     ambient = ET.SubElement(scene, "ambient")
-    ambient.text = SCENE_AMBIENT
+    ambient.text = format_color(config.scene_ambient)
     background = ET.SubElement(scene, "background")
-    background.text = SCENE_BACKGROUND
+    background.text = format_color(config.scene_background)
     shadows = ET.SubElement(scene, "shadows")
     shadows.text = "true"
 
@@ -857,6 +948,161 @@ def _append_world_environment(world: ET.Element) -> None:
     magnetic_field = ET.SubElement(world, "magnetic_field")
     magnetic_field.text = MAGNETIC_FIELD
     ET.SubElement(world, "atmosphere", type="adiabatic")
+
+
+def _append_point_light(
+    world: ET.Element,
+    name: str,
+    x: float,
+    y: float,
+    z: float,
+    *,
+    cast_shadows: bool,
+) -> None:
+    light = ET.SubElement(world, "light", name=name, type="point")
+    pose = ET.SubElement(light, "pose")
+    pose.text = _format_pose(x, y, z)
+    cast_shadows_element = ET.SubElement(light, "cast_shadows")
+    cast_shadows_element.text = "true" if cast_shadows else "false"
+    intensity = ET.SubElement(light, "intensity")
+    intensity.text = POINT_LIGHT["intensity"]
+    direction = ET.SubElement(light, "direction")
+    direction.text = POINT_LIGHT["direction"]
+    diffuse = ET.SubElement(light, "diffuse")
+    diffuse.text = POINT_LIGHT["diffuse"]
+    specular = ET.SubElement(light, "specular")
+    specular.text = POINT_LIGHT["specular"]
+
+    attenuation = ET.SubElement(light, "attenuation")
+    light_range = ET.SubElement(attenuation, "range")
+    light_range.text = POINT_LIGHT["range"]
+    linear = ET.SubElement(attenuation, "linear")
+    linear.text = POINT_LIGHT["linear"]
+    constant = ET.SubElement(attenuation, "constant")
+    constant.text = POINT_LIGHT["constant"]
+    quadratic = ET.SubElement(attenuation, "quadratic")
+    quadratic.text = POINT_LIGHT["quadratic"]
+
+
+def _append_layout_point_lights(
+    world: ET.Element,
+    wall_layout: WallLayout,
+    config: Config,
+) -> None:
+    layout = wall_layout.opening_layout.applied_layout
+    for cell in layout.partition.cells:
+        if layout.role_for(cell.id) is not CellRole.ROOM:
+            continue
+        centroid_x, centroid_y = cell.centroid
+        _append_point_light(
+            world,
+            f"room_light_{cell.id}",
+            centroid_x,
+            centroid_y,
+            config.light_height,
+            cast_shadows=True,
+        )
+
+    for cell in layout.partition.cells:
+        if layout.role_for(cell.id) is not CellRole.PASSAGE:
+            continue
+        for index, (x, y) in enumerate(
+            _passage_light_positions(cell, wall_layout, config)
+        ):
+            _append_point_light(
+                world,
+                f"passage_light_{cell.id}_{index}",
+                x,
+                y,
+                config.light_height,
+                cast_shadows=False,
+            )
+
+
+def _passage_walkable_geometry(
+    cell: Cell,
+    wall_layout: WallLayout,
+):
+    if wall_layout.passage_geometry is not None:
+        corridor = wall_layout.passage_geometry.corridor_for(cell.id)
+        if corridor is not None and not corridor.is_empty:
+            return corridor
+    return cell.polygon
+
+
+def _passage_light_positions(
+    cell: Cell,
+    wall_layout: WallLayout,
+    config: Config,
+) -> list[tuple[float, float]]:
+    geometry = _passage_walkable_geometry(cell, wall_layout)
+    if geometry.is_empty:
+        return []
+
+    centroid = geometry.centroid
+    minx, miny, maxx, maxy = geometry.bounds
+    span_x = maxx - minx
+    span_y = maxy - miny
+    spacing = config.corridor_light_spacing
+
+    if span_x >= span_y:
+        positions = _sample_axis_light_positions(
+            geometry,
+            start=minx,
+            end=maxx,
+            fixed_coord=centroid.y,
+            axis="x",
+            spacing=spacing,
+        )
+    else:
+        positions = _sample_axis_light_positions(
+            geometry,
+            start=miny,
+            end=maxy,
+            fixed_coord=centroid.x,
+            axis="y",
+            spacing=spacing,
+        )
+
+    if positions:
+        return positions
+    return [(centroid.x, centroid.y)]
+
+
+def _sample_axis_light_positions(
+    geometry,
+    *,
+    start: float,
+    end: float,
+    fixed_coord: float,
+    axis: Literal["x", "y"],
+    spacing: float,
+) -> list[tuple[float, float]]:
+    span = end - start
+    if span <= EPS:
+        point = (
+            Point(start, fixed_coord)
+            if axis == "x"
+            else Point(fixed_coord, start)
+        )
+        if geometry.contains(point) or geometry.touches(point):
+            return [(point.x, point.y)]
+        centroid = geometry.centroid
+        return [(centroid.x, centroid.y)]
+
+    count = max(1, math.ceil(span / spacing))
+    step = span / count
+    positions: list[tuple[float, float]] = []
+    for index in range(count):
+        coord = start + (index + 0.5) * step
+        point = (
+            Point(coord, fixed_coord)
+            if axis == "x"
+            else Point(fixed_coord, coord)
+        )
+        if geometry.contains(point) or geometry.touches(point):
+            positions.append((point.x, point.y))
+    return positions
 
 
 def _append_directional_light(world: ET.Element, settings: dict[str, str]) -> None:
@@ -898,6 +1144,7 @@ def _append_visual_material(
     *,
     material_style: str = "default",
     floor_texture_uri: str | None = None,
+    laminate_color: tuple[float, float, float] | None = None,
 ) -> None:
     if material_style == "ground_texture":
         if floor_texture_uri is None:
@@ -919,6 +1166,14 @@ def _append_visual_material(
         material = ET.SubElement(visual, "material")
         diffuse = ET.SubElement(material, "diffuse")
         diffuse.text = format_color(WALL_PAINT)
+        return
+
+    if material_style == "laminate":
+        if laminate_color is None:
+            raise SdfExportError("Laminate wall export requires laminate_color")
+        material = ET.SubElement(visual, "material")
+        diffuse = ET.SubElement(material, "diffuse")
+        diffuse.text = format_color(laminate_color)
         return
 
     if material_style == "solid_paint":
@@ -958,6 +1213,7 @@ def _append_box(
     kind: str,
     material_style: str = "default",
     floor_texture_uri: str | None = None,
+    laminate_color: tuple[float, float, float] | None = None,
 ) -> None:
     element = ET.SubElement(link, kind, name=name)
     pose = ET.SubElement(element, "pose")
@@ -973,6 +1229,7 @@ def _append_box(
             element,
             material_style=material_style,
             floor_texture_uri=floor_texture_uri,
+            laminate_color=laminate_color,
         )
 
 
@@ -1089,7 +1346,6 @@ def _append_fixture_models(
     *,
     textures_enabled: bool,
 ) -> None:
-    del config
     for instance in fixture_layout.instances:
         mesh_uri = mesh_uris[instance.mesh_relpath]
         cx, cy, cz = instance.collision_size
@@ -1118,6 +1374,8 @@ def _append_fixture_models(
             size_y=box.size_y,
             size_z=box.size_z,
             color=color,
+            box=box,
+            config=config,
         )
 
 
@@ -1175,6 +1433,8 @@ def _append_box_fixture_model(
     size_y: float,
     size_z: float,
     color: tuple[float, float, float],
+    box: BoxFixture,
+    config: Config,
 ) -> None:
     model = ET.SubElement(world, "model", name=_sanitize_sdf_name(model_name))
     static = ET.SubElement(model, "static")
@@ -1193,6 +1453,9 @@ def _append_box_fixture_model(
     material = ET.SubElement(visual, "material")
     diffuse = ET.SubElement(material, "diffuse")
     diffuse.text = format_color(color)
+    if box.color_key == "counter":
+        specular = ET.SubElement(material, "specular")
+        specular.text = format_color(config.counter_specular)
 
     collision = ET.SubElement(link, "collision", name=f"{model_name}_collision")
     collision_pose = ET.SubElement(collision, "pose")
@@ -1201,6 +1464,14 @@ def _append_box_fixture_model(
     collision_box = ET.SubElement(collision_geometry, "box")
     collision_size = ET.SubElement(collision_box, "size")
     collision_size.text = _format_size(size_x, size_y, size_z)
+    if box.color_key in ("counter", "cabinet"):
+        surface = ET.SubElement(collision, "surface")
+        friction = ET.SubElement(surface, "friction")
+        ode = ET.SubElement(friction, "ode")
+        mu = ET.SubElement(ode, "mu")
+        mu.text = f"{config.fixture_friction_mu:.6f}"
+        mu2 = ET.SubElement(ode, "mu2")
+        mu2.text = f"{config.fixture_friction_mu:.6f}"
 
 
 def _sanitize_sdf_name(name: str) -> str:

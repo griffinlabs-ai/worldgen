@@ -29,3 +29,12 @@ fixture_basin_offset_z: 0.0
 fixture_basin_offset_yaw: 0.0
 cubicle_door_width: 0.65
 # cubicle_wall_height: 2.0
+cubicle_wall_color: [0.36, 0.47, 0.55]
+lighting_mode: point
+light_height: 2.2
+corridor_light_spacing: 8.0
+scene_ambient: [0.28, 0.28, 0.28]
+scene_background: [0.7, 0.7, 0.7]
+physics_profile: ode
+counter_specular: [0.4, 0.4, 0.4]
+fixture_friction_mu: 10000.2

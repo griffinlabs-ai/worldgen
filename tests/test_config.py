@@ -124,6 +124,15 @@ def test_textures_enabled_defaults_false(tmp_path: Path) -> None:
     assert config.fixture_basin_offset_yaw == pytest.approx(0.0)
     assert config.cubicle_door_width == pytest.approx(0.65)
     assert config.cubicle_wall_height is None
+    assert config.cubicle_wall_color == pytest.approx((0.36, 0.47, 0.55))
+    assert config.lighting_mode == "directional"
+    assert config.light_height == pytest.approx(2.2)
+    assert config.corridor_light_spacing == pytest.approx(8.0)
+    assert config.scene_ambient == pytest.approx((0.28, 0.28, 0.28))
+    assert config.scene_background == pytest.approx((0.7, 0.7, 0.7))
+    assert config.physics_profile == "ignored"
+    assert config.counter_specular == pytest.approx((0.4, 0.4, 0.4))
+    assert config.fixture_friction_mu == pytest.approx(10000.2)
 
 
 def test_cubicle_settings_load_from_yaml(tmp_path: Path) -> None:
@@ -155,6 +164,57 @@ def test_cubicle_wall_height_above_wall_height_raises(tmp_path: Path) -> None:
 def test_cubicle_wall_height_non_positive_raises(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path, ["cubicle_wall_height: 0"])
     with pytest.raises(ConfigError, match="cubicle_wall_height"):
+        load_config(config_path)
+
+
+def test_visual_physics_settings_load_from_yaml(tmp_path: Path) -> None:
+    config = load_config(
+        _write_config(
+            tmp_path,
+            [
+                "cubicle_wall_color: [0.1, 0.2, 0.3]",
+                "lighting_mode: point",
+                "light_height: 3.0",
+                "corridor_light_spacing: 4.0",
+                "scene_ambient: [0.1, 0.1, 0.1]",
+                "scene_background: [0.5, 0.5, 0.5]",
+                "physics_profile: ode",
+                "counter_specular: [0.2, 0.2, 0.2]",
+                "fixture_friction_mu: 42.0",
+            ],
+        )
+    )
+    assert config.cubicle_wall_color == pytest.approx((0.1, 0.2, 0.3))
+    assert config.lighting_mode == "point"
+    assert config.light_height == pytest.approx(3.0)
+    assert config.corridor_light_spacing == pytest.approx(4.0)
+    assert config.scene_ambient == pytest.approx((0.1, 0.1, 0.1))
+    assert config.scene_background == pytest.approx((0.5, 0.5, 0.5))
+    assert config.physics_profile == "ode"
+    assert config.counter_specular == pytest.approx((0.2, 0.2, 0.2))
+    assert config.fixture_friction_mu == pytest.approx(42.0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("lighting_mode", "spot", "lighting_mode"),
+        ("physics_profile", "bullet", "physics_profile"),
+        ("light_height", "0", "light_height"),
+        ("corridor_light_spacing", "-1", "corridor_light_spacing"),
+        ("fixture_friction_mu", "0", "fixture_friction_mu"),
+        ("scene_ambient", "[1.5, 0.5, 0.5]", "scene_ambient\\[0\\]"),
+        ("cubicle_wall_color", "[0.5, 0.5]", "cubicle_wall_color"),
+    ],
+)
+def test_visual_physics_validation_raises(
+    tmp_path: Path,
+    field: str,
+    value: str,
+    match: str,
+) -> None:
+    config_path = _write_config(tmp_path, [f"{field}: {value}"])
+    with pytest.raises(ConfigError, match=match):
         load_config(config_path)
 
 

@@ -395,13 +395,14 @@ def test_export_world_sdf_uses_np_world_lighting_and_material(tmp_path: Path) ->
 
     world = root.find("world")
     assert world is not None
-    assert world.find("scene/ambient").text == "0.25 0.25 0.25 1"
-    assert world.find("scene/background").text == (
-        "0.550000012 0.600000024 0.649999976 1"
-    )
+    assert world.find("scene/ambient").text == "0.280000 0.280000 0.280000 1"
+    assert world.find("scene/background").text == "0.700000 0.700000 0.700000 1"
     assert world.find("scene/shadows").text == "true"
     assert world.find("gravity").text == "0 0 -9.8000000000000007"
+    assert world.find("physics").get("type") == "ignored"
+    assert world.find("physics/max_step_size").text == "0.001"
     assert world.find("atmosphere") is not None
+    assert world.findall("plugin") == []
 
     sun = next(
         light for light in world.findall("light") if light.get("name") == "sun"
@@ -502,3 +503,212 @@ def test_export_world_sdf_textures_disabled_unchanged(tmp_path: Path) -> None:
     assert material.find("lighting").text == "true"
     assert material.find("pbr/metal/roughness").text == "0.85"
     validate_world_sdf(sdf_path, wall_layout, config)
+
+
+def test_export_world_sdf_point_lighting_mode(tmp_path: Path) -> None:
+    config = _sample_config(lighting_mode="point", corridor_light_spacing=4.0)
+    wall_layout = _build_wall_layout({0, 1, 3}, config, 1)
+    sdf_path = tmp_path / "world.sdf"
+    export_world_sdf(wall_layout, config, sdf_path)
+
+    world = ET.parse(sdf_path).getroot().find("world")
+    assert world is not None
+    lights = world.findall("light")
+    assert lights
+    assert all(light.get("type") == "point" for light in lights)
+    assert world.find("./light[@name='sun']") is None
+    assert world.find("./light[@name='fill_light']") is None
+
+    room_lights = [
+        light for light in lights if (light.get("name") or "").startswith("room_light_")
+    ]
+    assert len(room_lights) == 3
+    assert all(
+        light.findtext("cast_shadows") == "true" for light in room_lights
+    )
+    assert all(
+        light.findtext("./attenuation/range") == "10" for light in lights
+    )
+
+    passage_lights = [
+        light
+        for light in lights
+        if (light.get("name") or "").startswith("passage_light_")
+    ]
+    assert passage_lights
+    assert all(
+        light.findtext("cast_shadows") == "false" for light in passage_lights
+    )
+
+
+def test_export_world_sdf_ode_physics_profile(tmp_path: Path) -> None:
+    config = _sample_config(physics_profile="ode")
+    wall_layout = _build_wall_layout({0, 1}, config, 1)
+    sdf_path = tmp_path / "world.sdf"
+    export_world_sdf(wall_layout, config, sdf_path)
+
+    world = ET.parse(sdf_path).getroot().find("world")
+    assert world is not None
+    plugins = world.findall("plugin")
+    assert len(plugins) == 4
+    assert {
+        plugin.get("filename") for plugin in plugins
+    } == {
+        "libignition-gazebo-physics-system.so",
+        "libignition-gazebo-user-commands-system.so",
+        "libignition-gazebo-scene-broadcaster-system.so",
+        "libignition-gazebo-forcetorque-system.so",
+    }
+
+    physics = world.find("physics")
+    assert physics is not None
+    assert physics.get("type") == "ode"
+    assert physics.findtext("max_step_size") == "0.02"
+    assert physics.findtext("real_time_update_rate") == "50"
+    assert physics.findtext("./ode/solver/type") == "quick"
+    assert physics.findtext("./ode/solver/iters") == "50"
+    assert physics.findtext("./ode/constraints/erp") == "0.8"
+
+
+def test_export_world_sdf_laminate_cubicle_walls_skip_skirting(tmp_path: Path) -> None:
+    fixture_models = Path(
+        "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
+    )
+    if not fixture_models.is_dir():
+        pytest.skip("fixture models directory not available")
+
+    from random_gazebo_world.fixtures import generate_fixtures
+
+    cell = Cell.from_origin_size(0, 0.0, 0.0, 8.0, 6.0)
+    partition = Partition(cells=(cell,), world_width=8.0, world_height=6.0)
+    selection = RoomSelection(partition=partition, room_cell_ids=frozenset({0}))
+    candidates = CandidateConnections(room_selection=selection, connections=())
+    selected = SelectedRoomGraph(
+        candidates=candidates,
+        connections=(),
+        spanning_tree_connections=(),
+        loop_connections=(),
+    )
+    applied = AppliedLayout(
+        partition=partition,
+        room_selection=selection,
+        selected_graph=selected,
+        passage_cell_ids=frozenset(),
+        logical_openings=(),
+    )
+    opening_layout = OpeningLayout(applied_layout=applied, openings=())
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(fixture_models),
+        textures_enabled=True,
+        cubicle_wall_color=(0.36, 0.47, 0.55),
+    )
+    wall_layout = generate_walls(
+        opening_layout, build_adjacency_graph(partition), config
+    )
+    fixture_layout = generate_fixtures(
+        wall_layout, config, create_seeded_rng(99)
+    )
+    merged = WallLayout(
+        opening_layout=wall_layout.opening_layout,
+        segments=wall_layout.segments + fixture_layout.extra_wall_segments,
+    )
+    sdf_path = tmp_path / "world.sdf"
+    export_world_sdf(merged, config, sdf_path, fixture_layout=fixture_layout)
+
+    world = ET.parse(sdf_path).getroot().find("world")
+    walls_link = world.find("./model[@name='walls']/link")
+    assert walls_link is not None
+
+    laminate_visuals = [
+        visual
+        for visual in walls_link.findall("visual")
+        if visual.findtext("./material/diffuse")
+        == "0.360000 0.470000 0.550000 1"
+    ]
+    assert laminate_visuals
+
+    skirt_visuals = [
+        item
+        for item in walls_link.findall("visual")
+        if (item.get("name") or "").startswith("skirt_")
+    ]
+    painted_wall_count = sum(
+        1 for segment in merged.segments if segment.material_key != "laminate"
+    )
+    assert len(skirt_visuals) == painted_wall_count
+    validate_world_sdf(sdf_path, merged, config, fixture_layout=fixture_layout)
+
+
+def test_export_world_sdf_counter_specular_and_friction(tmp_path: Path) -> None:
+    fixture_models = Path(
+        "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
+    )
+    if not fixture_models.is_dir():
+        pytest.skip("fixture models directory not available")
+
+    from random_gazebo_world.fixtures import generate_fixtures
+
+    cell = Cell.from_origin_size(0, 0.0, 0.0, 8.0, 6.0)
+    partition = Partition(cells=(cell,), world_width=8.0, world_height=6.0)
+    selection = RoomSelection(partition=partition, room_cell_ids=frozenset({0}))
+    candidates = CandidateConnections(room_selection=selection, connections=())
+    selected = SelectedRoomGraph(
+        candidates=candidates,
+        connections=(),
+        spanning_tree_connections=(),
+        loop_connections=(),
+    )
+    applied = AppliedLayout(
+        partition=partition,
+        room_selection=selection,
+        selected_graph=selected,
+        passage_cell_ids=frozenset(),
+        logical_openings=(),
+    )
+    opening_layout = OpeningLayout(applied_layout=applied, openings=())
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(fixture_models),
+        textures_enabled=True,
+        counter_specular=(0.4, 0.4, 0.4),
+        fixture_friction_mu=10000.2,
+    )
+    wall_layout = generate_walls(
+        opening_layout, build_adjacency_graph(partition), config
+    )
+    fixture_layout = generate_fixtures(
+        wall_layout, config, create_seeded_rng(99)
+    )
+    merged = WallLayout(
+        opening_layout=wall_layout.opening_layout,
+        segments=wall_layout.segments + fixture_layout.extra_wall_segments,
+    )
+    sdf_path = tmp_path / "world.sdf"
+    export_world_sdf(merged, config, sdf_path, fixture_layout=fixture_layout)
+
+    world = ET.parse(sdf_path).getroot().find("world")
+    counter_models = [
+        model
+        for model in world.findall("model")
+        if (model.get("name") or "").endswith("_counter")
+    ]
+    assert counter_models
+    counter = counter_models[0]
+    assert counter.findtext("./link/visual/material/specular") == (
+        "0.400000 0.400000 0.400000 1"
+    )
+    assert counter.findtext(
+        "./link/collision/surface/friction/ode/mu"
+    ) == "10000.200000"
+
+    cabinet_models = [
+        model
+        for model in world.findall("model")
+        if (model.get("name") or "").endswith("_cabinet")
+    ]
+    assert cabinet_models
+    cabinet = cabinet_models[0]
+    assert cabinet.findtext(
+        "./link/collision/surface/friction/ode/mu2"
+    ) == "10000.200000"

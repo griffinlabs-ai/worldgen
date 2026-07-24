@@ -270,6 +270,34 @@ def test_toilet_cluster_emits_enclosed_cubicles() -> None:
         assert len(front_segments) == len(cluster.instances)
 
 
+def test_cubicle_wall_segments_use_laminate_material_key() -> None:
+    if not FIXTURE_MODELS_DIR.is_dir():
+        pytest.skip("fixture models directory not available")
+    wall_layout = _large_room_wall_layout()
+    config = _sample_config(
+        fixture_mode="restroom_clusters",
+        fixture_models_dir=str(FIXTURE_MODELS_DIR),
+    )
+    layout = generate_fixtures(wall_layout, config, create_seeded_rng(99))
+    assert layout.extra_wall_segments
+    for segment in layout.extra_wall_segments:
+        assert segment.material_key == "laminate"
+
+
+def test_wall_segment_material_key_metadata_round_trip() -> None:
+    from random_gazebo_world.metadata import (
+        wall_segment_from_dict,
+        wall_segment_to_dict,
+    )
+    from random_gazebo_world.walls import WallSegment
+
+    segment = WallSegment(p1=(0.0, 0.0), p2=(1.0, 0.0), material_key="laminate")
+    payload = wall_segment_to_dict(segment)
+    assert payload["material_key"] == "laminate"
+    restored = wall_segment_from_dict(payload)
+    assert restored == segment
+
+
 def test_cubicle_wall_segments_respect_wall_thickness() -> None:
     if not FIXTURE_MODELS_DIR.is_dir():
         pytest.skip("fixture models directory not available")

@@ -24,7 +24,7 @@ class WallSegment:
     callers and tests keep working.
     """
 
-    __slots__ = ("p1", "p2", "height")
+    __slots__ = ("p1", "p2", "height", "material_key")
 
     def __init__(
         self,
@@ -36,6 +36,7 @@ class WallSegment:
         p1: Vec2 | None = None,
         p2: Vec2 | None = None,
         height: float | None = None,
+        material_key: str | None = None,
     ) -> None:
         if p1 is not None and p2 is not None:
             point_a, point_b = p1, p2
@@ -58,6 +59,7 @@ class WallSegment:
         if height is not None and height <= 0:
             raise ValueError("WallSegment height must be positive when provided")
         object.__setattr__(self, "height", height)
+        object.__setattr__(self, "material_key", material_key)
 
     @property
     def length(self) -> float:
@@ -114,15 +116,21 @@ class WallSegment:
             self.p1 == other.p1
             and self.p2 == other.p2
             and self.height == other.height
+            and self.material_key == other.material_key
         )
 
     def __hash__(self) -> int:
-        return hash((self.p1, self.p2, self.height))
+        return hash((self.p1, self.p2, self.height, self.material_key))
 
     def __repr__(self) -> str:
-        if self.height is None:
+        if self.height is None and self.material_key is None:
             return f"WallSegment(p1={self.p1}, p2={self.p2})"
-        return f"WallSegment(p1={self.p1}, p2={self.p2}, height={self.height})"
+        extras = []
+        if self.height is not None:
+            extras.append(f"height={self.height}")
+        if self.material_key is not None:
+            extras.append(f"material_key={self.material_key!r}")
+        return f"WallSegment(p1={self.p1}, p2={self.p2}, {', '.join(extras)})"
 
 
 class WallLayout:

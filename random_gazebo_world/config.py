@@ -67,6 +67,15 @@ class Config:
     fixture_basin_offset_yaw: float = 0.0
     cubicle_door_width: float = 0.65
     cubicle_wall_height: float | None = None
+    cubicle_wall_color: tuple[float, float, float] = (0.36, 0.47, 0.55)
+    lighting_mode: str = "directional"
+    light_height: float = 2.2
+    corridor_light_spacing: float = 8.0
+    scene_ambient: tuple[float, float, float] = (0.28, 0.28, 0.28)
+    scene_background: tuple[float, float, float] = (0.7, 0.7, 0.7)
+    physics_profile: str = "ignored"
+    counter_specular: tuple[float, float, float] = (0.4, 0.4, 0.4)
+    fixture_friction_mu: float = 10000.2
 
     def validate(self) -> None:
         if self.layout_mode not in ("partition", "corridor"):
@@ -141,6 +150,7 @@ class Config:
         _require_positive(self.floor_tile_size, "floor_tile_size")
         _validate_fixture_visual_offsets(self)
         _validate_cubicle_settings(self)
+        _validate_visual_physics_settings(self)
         if self.passage_geometry_mode not in ("curved", "legacy_orthogonal"):
             raise ConfigError(
                 "passage_geometry_mode must be 'curved' or 'legacy_orthogonal', got "
@@ -216,6 +226,7 @@ class Config:
         _require_positive(self.floor_tile_size, "floor_tile_size")
         _validate_fixture_visual_offsets(self)
         _validate_cubicle_settings(self)
+        _validate_visual_physics_settings(self)
 
         min_room_width = self.entrance_width + 2.0 * self.wall_thickness
         if self.room_width_min + EPS < min_room_width:
@@ -323,6 +334,17 @@ def load_config(path: Path | str) -> Config:
             fixture_basin_offset_yaw=raw.get("fixture_basin_offset_yaw", 0.0),
             cubicle_door_width=raw.get("cubicle_door_width", 0.65),
             cubicle_wall_height=raw.get("cubicle_wall_height"),
+            cubicle_wall_color=_load_rgb(
+                raw, "cubicle_wall_color", (0.36, 0.47, 0.55)
+            ),
+            lighting_mode=raw.get("lighting_mode", "directional"),
+            light_height=raw.get("light_height", 2.2),
+            corridor_light_spacing=raw.get("corridor_light_spacing", 8.0),
+            scene_ambient=_load_rgb(raw, "scene_ambient", (0.28, 0.28, 0.28)),
+            scene_background=_load_rgb(raw, "scene_background", (0.7, 0.7, 0.7)),
+            physics_profile=raw.get("physics_profile", "ignored"),
+            counter_specular=_load_rgb(raw, "counter_specular", (0.4, 0.4, 0.4)),
+            fixture_friction_mu=raw.get("fixture_friction_mu", 10000.2),
         )
     except KeyError as exc:
         raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc
@@ -410,11 +432,57 @@ def _validate_cubicle_settings(config: Config) -> None:
             f"{config.cubicle_door_width + min_front_wall}"
         )
     if config.cubicle_wall_height is None:
-        return
-    _require_finite_number(config.cubicle_wall_height, "cubicle_wall_height")
-    _require_positive(config.cubicle_wall_height, "cubicle_wall_height")
-    if config.cubicle_wall_height > config.wall_height + EPS:
+        pass
+    else:
+        _require_finite_number(config.cubicle_wall_height, "cubicle_wall_height")
+        _require_positive(config.cubicle_wall_height, "cubicle_wall_height")
+        if config.cubicle_wall_height > config.wall_height + EPS:
+            raise ConfigError(
+                "cubicle_wall_height must be <= wall_height "
+                f"({config.wall_height}), got {config.cubicle_wall_height}"
+            )
+
+
+def _load_rgb(
+    raw: dict[str, Any],
+    name: str,
+    default: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    value = raw.get(name, default)
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ConfigError(f"{name} must be an RGB list of three values, got {value!r}")
+    return tuple(float(channel) for channel in value)
+
+
+def _validate_rgb_channels(value: tuple[float, float, float], name: str) -> None:
+    for index, channel in enumerate(value):
+        channel_name = f"{name}[{index}]"
+        _require_finite_number(channel, channel_name)
+        if not 0.0 <= channel <= 1.0:
+            raise ConfigError(f"{channel_name} must be in [0, 1], got {channel}")
+
+
+def _validate_visual_physics_settings(config: Config) -> None:
+    _validate_rgb_channels(config.cubicle_wall_color, "cubicle_wall_color")
+    _validate_rgb_channels(config.scene_ambient, "scene_ambient")
+    _validate_rgb_channels(config.scene_background, "scene_background")
+    _validate_rgb_channels(config.counter_specular, "counter_specular")
+
+    if config.lighting_mode not in ("directional", "point"):
         raise ConfigError(
-            "cubicle_wall_height must be <= wall_height "
-            f"({config.wall_height}), got {config.cubicle_wall_height}"
+            "lighting_mode must be 'directional' or 'point', got "
+            f"{config.lighting_mode!r}"
         )
+    _require_finite_number(config.light_height, "light_height")
+    _require_positive(config.light_height, "light_height")
+    _require_finite_number(config.corridor_light_spacing, "corridor_light_spacing")
+    _require_positive(config.corridor_light_spacing, "corridor_light_spacing")
+
+    if config.physics_profile not in ("ignored", "ode"):
+        raise ConfigError(
+            "physics_profile must be 'ignored' or 'ode', got "
+            f"{config.physics_profile!r}"
+        )
+
+    _require_finite_number(config.fixture_friction_mu, "fixture_friction_mu")
+    _require_positive(config.fixture_friction_mu, "fixture_friction_mu")
