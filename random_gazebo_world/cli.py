@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from random_gazebo_world.config import load_config
+from random_gazebo_world.feasibility import enforce_feasibility
 from random_gazebo_world.pipeline import generate_valid_world, write_world_outputs
 
 
@@ -32,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         type=Path,
         help="Output directory for generated world artifacts.",
+    )
+    generate.add_argument(
+        "--strict-config",
+        action="store_true",
+        help="Treat feasibility warnings as errors.",
     )
     generate.add_argument(
         "--debug-retries",
@@ -69,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(args.config)
         if args.seed is not None:
             config = config.with_seed(args.seed)
+        enforce_feasibility(config, strict=args.strict_config)
         generate_world(
             config,
             args.out,
