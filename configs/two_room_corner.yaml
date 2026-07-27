@@ -1,0 +1,13 @@
+layout_mode: two_room_corner
+room_size: 4.0
+leg_a_width: 0.78
+leg_a_length: 3.0
+leg_b_width: 0.78
+leg_b_length: 3.0
+wall_height: 2.5
+wall_thickness: 0.05
+map_resolution: 0.05
+random_seed: 42
+max_attempts: 1
+ground_thickness: 0.1
+fixture_mode: none

@@ -50,6 +50,39 @@ def test_baseline_has_no_errors() -> None:
     assert errors == []
 
 
+def test_gate_room_size_too_small_is_infeasible() -> None:
+    from dataclasses import replace
+
+    config = replace(
+        _baseline_config(fixture_mode="none"),
+        layout_mode="two_room_gate",
+        room_size=0.5,
+        gate_width=0.78,
+        divider_thickness=0.5,
+        fixture_mode="none",
+    )
+    codes = _issue_codes(check_feasibility(config))
+    assert ("error", "gate_cannot_fit_room_wall") in codes
+
+
+def test_corner_leg_width_sub_pixel_warning() -> None:
+    from dataclasses import replace
+
+    config = replace(
+        _baseline_config(fixture_mode="none"),
+        layout_mode="two_room_corner",
+        room_size=4.0,
+        leg_a_width=0.02,
+        leg_a_length=3.0,
+        leg_b_width=0.78,
+        leg_b_length=3.0,
+        fixture_mode="none",
+    )
+    config.validate()
+    codes = _issue_codes(check_feasibility(config))
+    assert ("warning", "sub_pixel_features") in codes
+
+
 def test_room_count_exceeds_max_cells() -> None:
     config = _baseline_config(min_room_count=101, max_room_count=101)
     codes = _issue_codes(check_feasibility(config))

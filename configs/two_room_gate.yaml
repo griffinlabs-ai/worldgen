@@ -1,0 +1,12 @@
+layout_mode: two_room_gate
+room_size: 4.0
+gate_width: 0.78
+divider_thickness: 0.5
+wall_height: 2.5
+wall_thickness: 0.05
+map_resolution: 0.05
+random_seed: 42
+max_attempts: 1
+ground_thickness: 0.1
+passage_geometry_mode: legacy_orthogonal
+fixture_mode: none

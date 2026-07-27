@@ -13,6 +13,11 @@ import networkx as nx
 from random_gazebo_world.adjacency import AdjacencyGraph, build_adjacency_graph
 from random_gazebo_world.config import Config
 from random_gazebo_world.corridor import CorridorError, generate_corridor_layout
+from random_gazebo_world.two_room import (
+    TwoRoomError,
+    generate_two_room_corner_layout,
+    generate_two_room_gate_layout,
+)
 from random_gazebo_world.fixtures import FixtureError, FixtureLayout, generate_fixtures
 from random_gazebo_world.export_map import (
     OccupancyMap,
@@ -125,6 +130,7 @@ RETRYABLE_ERRORS = (
     OccupancyMapError,
     PartitionError,
     CorridorError,
+    TwoRoomError,
     FixtureError,
 )
 
@@ -145,6 +151,7 @@ class GeneratedWorld:
     occupancy: OccupancyMap
     layout_document: LayoutDocument
     attempt: int
+    room_centers: tuple | None = None
 
 
 class _RetryDiagnostics:
@@ -253,6 +260,34 @@ def generate_valid_world(
                 continue
             continue
 
+        if attempt_config.layout_mode in ("two_room_gate", "two_room_corner"):
+            try:
+                world = _attempt_two_room_world(
+                    attempt_config,
+                    attempt,
+                    diagnostics,
+                )
+                diagnostics.emit_success(world)
+                return world
+            except _RetryStageError as exc:
+                last_error = exc.cause
+                diagnostics.record_rejection(
+                    stage=exc.stage,
+                    context={"attempt": attempt, "seed": attempt_config.random_seed}
+                    | exc.context,
+                    error=exc.cause,
+                )
+                continue
+            except RETRYABLE_ERRORS as exc:
+                last_error = exc
+                diagnostics.record_rejection(
+                    stage="two_room_layout",
+                    context={"attempt": attempt, "seed": attempt_config.random_seed},
+                    error=exc,
+                )
+                continue
+            continue
+
         try:
             structure = _build_structure(attempt_config, rng)
         except _RetryStageError as exc:
@@ -329,6 +364,7 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
         world.layout_document,
         world.selected_graph,
         nav_task=nav_task,
+        room_centers=world.room_centers,
     )
     render_partition(world.partition, debug_dir / "01_partition")
     render_selected_rooms(
@@ -374,7 +410,11 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
 
 
 def validate_world_connectivity(world: GeneratedWorld) -> None:
-    if world.config.layout_mode == "corridor":
+    if world.config.layout_mode in (
+        "corridor",
+        "two_room_gate",
+        "two_room_corner",
+    ):
         return
 
     room_ids = sorted(world.room_selection.room_cell_ids)
@@ -553,6 +593,102 @@ def _attempt_corridor_world(
         occupancy=occupancy,
         layout_document=layout_document,
         attempt=attempt,
+    )
+
+
+def _attempt_two_room_world(
+    config: Config,
+    attempt: int,
+    diagnostics: _RetryDiagnostics,
+) -> GeneratedWorld:
+    del diagnostics
+    base_context = {"attempt": attempt, "seed": config.random_seed}
+    if config.layout_mode == "two_room_gate":
+        layout = _run_retryable_stage(
+            "two_room_layout",
+            context=base_context,
+            operation=lambda: generate_two_room_gate_layout(config),
+        )
+    elif config.layout_mode == "two_room_corner":
+        layout = _run_retryable_stage(
+            "two_room_layout",
+            context=base_context,
+            operation=lambda: generate_two_room_corner_layout(config),
+        )
+    else:
+        raise WorldGenerationError(f"Unsupported two-room layout mode: {config.layout_mode}")
+
+    attempt_config = layout.config
+    if layout.passage_geometry is None:
+        passage_geometry = _run_retryable_stage(
+            "passage_geometry",
+            context=base_context,
+            operation=lambda: generate_passage_geometry(
+                layout.opening_layout,
+                attempt_config,
+            ),
+        )
+    else:
+        passage_geometry = layout.passage_geometry
+
+    pinned_start_goal = (
+        (layout.room_centers[0].x, layout.room_centers[0].y),
+        (layout.room_centers[1].x, layout.room_centers[1].y),
+    )
+    wall_layout = _run_retryable_stage(
+        "walls",
+        context=base_context,
+        operation=lambda: generate_walls(
+            layout.opening_layout,
+            layout.adjacency,
+            attempt_config,
+            passage_geometry,
+        ),
+    )
+    fixture_layout = _run_retryable_stage(
+        "fixtures",
+        context=base_context,
+        operation=lambda: generate_fixtures(
+            wall_layout,
+            attempt_config,
+            create_seeded_rng(attempt_config.random_seed),
+        ),
+    )
+    wall_layout = _merge_fixture_walls(wall_layout, fixture_layout)
+    occupancy = _run_retryable_stage(
+        "map_task",
+        context=base_context,
+        operation=lambda: generate_occupancy_map(
+            wall_layout,
+            attempt_config,
+            create_seeded_rng(attempt_config.random_seed),
+            fixture_layout=fixture_layout,
+            pinned_start_goal_world=pinned_start_goal,
+        ),
+    )
+    layout_document = build_layout_document(
+        layout.applied_layout,
+        layout.opening_layout,
+        wall_layout,
+        passage_geometry,
+        fixture_layout=fixture_layout,
+    )
+    return GeneratedWorld(
+        config=attempt_config,
+        partition=layout.partition,
+        adjacency=layout.adjacency,
+        room_selection=layout.room_selection,
+        candidates=layout.candidates,
+        selected_graph=layout.selected_graph,
+        applied_layout=layout.applied_layout,
+        opening_layout=layout.opening_layout,
+        passage_geometry=passage_geometry,
+        wall_layout=wall_layout,
+        fixture_layout=fixture_layout,
+        occupancy=occupancy,
+        layout_document=layout_document,
+        attempt=attempt,
+        room_centers=layout.room_centers,
     )
 
 

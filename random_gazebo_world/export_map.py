@@ -124,6 +124,7 @@ def generate_occupancy_map(
     rng,
     *,
     fixture_layout: FixtureLayout | None = None,
+    pinned_start_goal_world: tuple[tuple[float, float], tuple[float, float]] | None = None,
 ) -> OccupancyMap:
     layout = wall_layout.opening_layout.applied_layout
     partition = layout.partition
@@ -182,14 +183,24 @@ def generate_occupancy_map(
         occupied_geom = unary_union(occupied_geometries)
         grid[contains_xy(occupied_geom, grid_x, grid_y)] = OCCUPIED_VALUE
 
-    start_cell, goal_cell = _sample_start_goal_cells(
-        grid,
-        layout,
-        resolution,
-        origin_x,
-        origin_y,
-        rng,
-    )
+    if pinned_start_goal_world is not None:
+        start_cell, goal_cell = _resolve_pinned_start_goal_cells(
+            grid,
+            layout,
+            resolution,
+            origin_x,
+            origin_y,
+            pinned_start_goal_world,
+        )
+    else:
+        start_cell, goal_cell = _sample_start_goal_cells(
+            grid,
+            layout,
+            resolution,
+            origin_x,
+            origin_y,
+            rng,
+        )
     occupancy = OccupancyMap(
         data=grid,
         resolution=resolution,
@@ -341,6 +352,94 @@ def _cells_reachable(
             queue.append(neighbor)
 
     return False
+
+
+def _world_to_cell(
+    world_x: float,
+    world_y: float,
+    resolution: float,
+    origin_x: float,
+    origin_y: float,
+    height: int,
+) -> tuple[int, int]:
+    col = int(round((world_x - origin_x) / resolution - 0.5))
+    row = int(round(height - 1 - (world_y - origin_y) / resolution + 0.5))
+    return row, col
+
+
+def _nearest_free_cell(
+    grid: np.ndarray,
+    target: tuple[int, int],
+    *,
+    candidates: list[tuple[int, int]] | None = None,
+) -> tuple[int, int]:
+    if candidates is None:
+        candidates = _free_cell_coordinates(grid)
+    if not candidates:
+        raise OccupancyMapError("No free cells available for pinned start/goal")
+
+    best = min(
+        candidates,
+        key=lambda cell: (
+            (cell[0] - target[0]) ** 2 + (cell[1] - target[1]) ** 2,
+            cell[0],
+            cell[1],
+        ),
+    )
+    return best
+
+
+def _resolve_pinned_start_goal_cells(
+    grid: np.ndarray,
+    layout,
+    resolution: float,
+    origin_x: float,
+    origin_y: float,
+    pinned_start_goal_world: tuple[tuple[float, float], tuple[float, float]],
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    height = grid.shape[0]
+    room_ids = sorted(layout.room_selection.room_cell_ids)
+    if len(room_ids) < 2:
+        raise OccupancyMapError(
+            "Pinned start/goal requires at least two selected rooms"
+        )
+
+    resolved: list[tuple[int, int]] = []
+    for index, (world_x, world_y) in enumerate(pinned_start_goal_world):
+        target = _world_to_cell(
+            world_x,
+            world_y,
+            resolution,
+            origin_x,
+            origin_y,
+            height,
+        )
+        room_id = room_ids[index]
+        room_cells = _free_cells_for_room(
+            grid,
+            layout,
+            room_id,
+            resolution,
+            origin_x,
+            origin_y,
+        )
+        if not room_cells:
+            raise OccupancyMapError(
+                f"No free cells found in room {room_id} for pinned pose"
+            )
+        cell = (
+            target
+            if _is_free(grid, target) and target in room_cells
+            else _nearest_free_cell(grid, target, candidates=room_cells)
+        )
+        resolved.append(cell)
+
+    start_cell, goal_cell = resolved[0], resolved[1]
+    if not _is_free(grid, start_cell) or not _is_free(grid, goal_cell):
+        raise OccupancyMapError("Pinned start/goal resolved outside free space")
+    if not _cells_reachable(grid, start_cell, goal_cell):
+        raise OccupancyMapError("Pinned start and goal are not reachable")
+    return start_cell, goal_cell
 
 
 def _sample_start_goal_cells(

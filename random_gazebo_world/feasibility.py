@@ -21,6 +21,15 @@ class FeasibilityError(ValueError):
 
 def check_feasibility(config) -> list[FeasibilityIssue]:
     issues: list[FeasibilityIssue] = []
+
+    if config.layout_mode == "two_room_gate":
+        issues.extend(_check_two_room_gate_feasibility(config))
+        return issues
+
+    if config.layout_mode == "two_room_corner":
+        issues.extend(_check_two_room_corner_feasibility(config))
+        return issues
+
     w = config.world_width
     h = config.world_height
 
@@ -190,6 +199,127 @@ def check_feasibility(config) -> list[FeasibilityIssue]:
                     ),
                 )
             )
+
+    return issues
+
+
+def _check_two_room_common_feasibility(config) -> list[FeasibilityIssue]:
+    issues: list[FeasibilityIssue] = []
+    sub_pixel_offenders: list[str] = []
+    if config.wall_thickness < config.map_resolution:
+        sub_pixel_offenders.append(
+            f"wall_thickness ({config.wall_thickness}) < map_resolution "
+            f"({config.map_resolution})"
+        )
+    if sub_pixel_offenders:
+        issues.append(
+            FeasibilityIssue(
+                severity="warning",
+                code="sub_pixel_features",
+                message=(
+                    "These features are smaller than ~1 occupancy-map pixel "
+                    f"(map_resolution={config.map_resolution}) and may vanish or "
+                    f"break connectivity on the Nav2 map: "
+                    f"{'; '.join(sub_pixel_offenders)}."
+                ),
+            )
+        )
+    return issues
+
+
+def _check_two_room_gate_feasibility(config) -> list[FeasibilityIssue]:
+    issues = _check_two_room_common_feasibility(config)
+    assert config.gate_width is not None
+    assert config.room_size is not None
+    assert config.divider_thickness is not None
+
+    if config.gate_width < 2 * config.map_resolution:
+        issues.append(
+            FeasibilityIssue(
+                severity="warning",
+                code="sub_pixel_features",
+                message=(
+                    f"gate_width ({config.gate_width}) < 2*map_resolution "
+                    f"({2 * config.map_resolution}) and may not appear on the map."
+                ),
+            )
+        )
+
+    min_room_span = config.gate_width + 2.0 * config.wall_thickness
+    if config.room_size + EPS < min_room_span:
+        issues.append(
+            FeasibilityIssue(
+                severity="error",
+                code="gate_cannot_fit_room_wall",
+                message=(
+                    f"room_size ({config.room_size}) must be >= gate_width + "
+                    f"2 * wall_thickness ({min_room_span})."
+                ),
+            )
+        )
+
+    if config.divider_thickness < config.wall_thickness:
+        issues.append(
+            FeasibilityIssue(
+                severity="warning",
+                code="divider_thinner_than_wall",
+                message=(
+                    f"divider_thickness ({config.divider_thickness}) is smaller than "
+                    f"wall_thickness ({config.wall_thickness}); the passage cell may "
+                    f"be narrower than the wall slabs."
+                ),
+            )
+        )
+
+    return issues
+
+
+def _check_two_room_corner_feasibility(config) -> list[FeasibilityIssue]:
+    issues = _check_two_room_common_feasibility(config)
+    assert config.room_size is not None
+    assert config.leg_a_width is not None
+    assert config.leg_b_width is not None
+
+    for name, width in (
+        ("leg_a_width", config.leg_a_width),
+        ("leg_b_width", config.leg_b_width),
+    ):
+        if width < 2 * config.map_resolution:
+            issues.append(
+                FeasibilityIssue(
+                    severity="warning",
+                    code="sub_pixel_features",
+                    message=(
+                        f"{name} ({width}) < 2*map_resolution "
+                        f"({2 * config.map_resolution}) and may not appear on the map."
+                    ),
+                )
+            )
+
+    min_room_a_span = config.leg_a_width + 2.0 * config.wall_thickness
+    min_room_b_span = config.leg_b_width + 2.0 * config.wall_thickness
+    if config.room_size + EPS < min_room_a_span:
+        issues.append(
+            FeasibilityIssue(
+                severity="error",
+                code="leg_a_cannot_fit_room_wall",
+                message=(
+                    f"room_size ({config.room_size}) must be >= leg_a_width + "
+                    f"2 * wall_thickness ({min_room_a_span})."
+                ),
+            )
+        )
+    if config.room_size + EPS < min_room_b_span:
+        issues.append(
+            FeasibilityIssue(
+                severity="error",
+                code="leg_b_cannot_fit_room_wall",
+                message=(
+                    f"room_size ({config.room_size}) must be >= leg_b_width + "
+                    f"2 * wall_thickness ({min_room_b_span})."
+                ),
+            )
+        )
 
     return issues
 

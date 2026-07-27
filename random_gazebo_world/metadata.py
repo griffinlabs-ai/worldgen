@@ -109,6 +109,7 @@ def export_metadata_json(
     document: LayoutDocument,
     selected_graph: SelectedRoomGraph,
     nav_task: dict[str, Any] | None = None,
+    room_centers: tuple[Any, ...] | None = None,
 ) -> None:
     payload = {
         "seed": config.random_seed,
@@ -153,6 +154,15 @@ def export_metadata_json(
     }
     if nav_task is not None:
         payload["nav_task"] = nav_task
+    if room_centers is not None:
+        payload["room_centers"] = [
+            {
+                "cell_id": center.cell_id,
+                "x": center.x,
+                "y": center.y,
+            }
+            for center in room_centers
+        ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
