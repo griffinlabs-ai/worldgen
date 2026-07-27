@@ -18,10 +18,10 @@ from random_gazebo_world.partition import Partition
 from random_gazebo_world.passage_geometry import PassageGeometryLayout
 from random_gazebo_world.pipeline import (
     REQUIRED_DEBUG_STAGES,
-    REQUIRED_OUTPUTS,
     GeneratedWorld,
     WorldValidationError,
     generate_valid_world,
+    required_outputs,
     validate_world_connectivity,
     write_world_outputs,
 )
@@ -128,12 +128,13 @@ def test_generate_valid_world_connects_all_rooms() -> None:
 
 def test_cli_output_set_is_complete(tmp_path: Path) -> None:
     world = generate_valid_world(_sample_config(random_seed=7))
-    write_world_outputs(world, tmp_path / "world")
+    out_dir = tmp_path / "world"
+    write_world_outputs(world, out_dir)
 
-    for relative_path in REQUIRED_OUTPUTS:
-        assert (tmp_path / "world" / relative_path).is_file()
+    for relative_path in required_outputs(out_dir):
+        assert (out_dir / relative_path).is_file()
 
-    debug_dir = tmp_path / "world" / "debug"
+    debug_dir = out_dir / "debug"
     for stage in REQUIRED_DEBUG_STAGES:
         assert (debug_dir / f"{stage}.png").is_file()
         if stage != "09_occupancy_map_preview":

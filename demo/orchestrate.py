@@ -214,9 +214,11 @@ def generate_worlds(args: argparse.Namespace, seeds: list[int]) -> dict[int, Pat
     world_dirs: dict[int, Path] = {}
     for seed in seeds:
         wdir = worlds_dir / f"world_{seed}"
-        if args.skip_generate and not (wdir / "world.sdf").is_file():
+        world_sdf = wdir / f"{wdir.name}.sdf"
+        if args.skip_generate and not world_sdf.is_file():
             fallback = fallback_worlds_dir / f"world_{seed}"
-            if fallback != wdir and (fallback / "world.sdf").is_file():
+            fallback_sdf = fallback / f"{fallback.name}.sdf"
+            if fallback != wdir and fallback_sdf.is_file():
                 print(
                     "[orchestrate] reusing generated world "
                     f"seed={seed} from {fallback}"
@@ -227,16 +229,15 @@ def generate_worlds(args: argparse.Namespace, seeds: list[int]) -> dict[int, Pat
             world = generate_valid_world(config.with_seed(seed))
             write_world_outputs(world, wdir)
             augment_world.augment_world_sdf(
-                wdir / "world.sdf", wdir / "world_nav.sdf"
+                wdir / f"{wdir.name}.sdf", wdir / "world_nav.sdf"
             )
-        if not (wdir / "world.sdf").is_file():
+        world_sdf = wdir / f"{wdir.name}.sdf"
+        if not world_sdf.is_file():
             raise FileNotFoundError(
-                f"Missing generated world for seed {seed}: {wdir / 'world.sdf'}"
+                f"Missing generated world for seed {seed}: {world_sdf}"
             )
         if not (wdir / "world_nav.sdf").is_file():
-            augment_world.augment_world_sdf(
-                wdir / "world.sdf", wdir / "world_nav.sdf"
-            )
+            augment_world.augment_world_sdf(world_sdf, wdir / "world_nav.sdf")
         world_dirs[seed] = wdir
     return world_dirs
 

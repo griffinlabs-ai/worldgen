@@ -428,6 +428,32 @@ def test_export_world_sdf_uses_np_world_lighting_and_material(tmp_path: Path) ->
     assert material.find("pbr/metal/roughness").text == "0.85"
 
 
+def test_export_world_sdf_world_name_matches_output_stem(tmp_path: Path) -> None:
+    config = _sample_config()
+    wall_layout = _build_wall_layout({0, 1}, config, 1)
+    sdf_path = tmp_path / "my_world.sdf"
+    export_world_sdf(wall_layout, config, sdf_path)
+
+    world = ET.parse(sdf_path).getroot().find("world")
+    assert world is not None
+    assert world.get("name") == "my_world"
+
+
+def test_write_world_outputs_sdf_name_matches_out_dir(tmp_path: Path) -> None:
+    from random_gazebo_world.pipeline import generate_valid_world, write_world_outputs
+
+    config = _sample_config(min_room_count=3, max_room_count=3)
+    world = generate_valid_world(config, max_attempts=50)
+    out_dir = tmp_path / "gate_test"
+    write_world_outputs(world, out_dir)
+
+    sdf_path = out_dir / "gate_test.sdf"
+    assert sdf_path.is_file()
+    world_el = ET.parse(sdf_path).getroot().find("world")
+    assert world_el is not None
+    assert world_el.get("name") == "gate_test"
+
+
 def test_generated_world_sdf_exports(tmp_path: Path) -> None:
     config = _sample_config()
     partition = generate_partition(config, create_seeded_rng(42))

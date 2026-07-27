@@ -120,11 +120,13 @@ def test_end_to_end_voronoi_world(tmp_path: Path) -> None:
     assert len(world.room_selection.room_cell_ids) >= config.min_room_count
 
     write_world_outputs(world, tmp_path)
-    assert (tmp_path / "world.sdf").is_file()
+    sdf_path = tmp_path / f"{tmp_path.name}.sdf"
+    assert sdf_path.is_file()
     assert (tmp_path / "map.png").is_file()
 
-    tree = ET.parse(tmp_path / "world.sdf")
+    tree = ET.parse(sdf_path)
     world_el = tree.getroot().find("world")
     assert world_el is not None
+    assert world_el.get("name") == tmp_path.name
     model_names = {model.get("name") for model in world_el.findall("model")}
     assert {"walls", "ground"}.issubset(model_names)

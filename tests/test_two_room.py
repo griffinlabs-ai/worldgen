@@ -11,8 +11,8 @@ from random_gazebo_world.config import Config, ConfigError, load_config
 from random_gazebo_world.export_map import build_nav_task, cell_to_world
 from random_gazebo_world.pipeline import (
     REQUIRED_DEBUG_STAGES,
-    REQUIRED_OUTPUTS,
     generate_valid_world,
+    required_outputs,
     write_world_outputs,
 )
 from random_gazebo_world.two_room import (
@@ -181,7 +181,7 @@ def test_gate_end_to_end_outputs_and_pins_nav_task(tmp_path: Path) -> None:
     out_dir = tmp_path / "gate_world"
     write_world_outputs(world, out_dir)
 
-    for relative_path in REQUIRED_OUTPUTS:
+    for relative_path in required_outputs(out_dir):
         assert (out_dir / relative_path).is_file()
 
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
@@ -211,7 +211,7 @@ def test_corner_end_to_end_outputs_and_pins_nav_task(tmp_path: Path) -> None:
     out_dir = tmp_path / "corner_world"
     write_world_outputs(world, out_dir)
 
-    for relative_path in REQUIRED_OUTPUTS:
+    for relative_path in required_outputs(out_dir):
         assert (out_dir / relative_path).is_file()
 
     debug_dir = out_dir / "debug"

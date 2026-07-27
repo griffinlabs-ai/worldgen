@@ -409,7 +409,7 @@ def test_corridor_integration_with_fixtures(tmp_path: Path) -> None:
     write_world_outputs(world, out_dir)
 
     for relative_path in (
-        "world.sdf",
+        f"{out_dir.name}.sdf",
         "map.png",
         "layout.json",
         "metadata.json",
@@ -420,7 +420,8 @@ def test_corridor_integration_with_fixtures(tmp_path: Path) -> None:
     assert "12_fixtures" in REQUIRED_DEBUG_STAGES
 
     assert not (out_dir / "meshes" / "fixtures").exists()
-    sdf_text = (out_dir / "world.sdf").read_text(encoding="utf-8")
+    sdf_path = out_dir / f"{out_dir.name}.sdf"
+    sdf_text = sdf_path.read_text(encoding="utf-8")
     assert "model://" in sdf_text
     assert "<albedo_map>floor_texture.png</albedo_map>" in sdf_text
 
@@ -434,7 +435,7 @@ def test_corridor_integration_with_fixtures(tmp_path: Path) -> None:
     assert loaded.fixture_cubicles
 
     validate_world_sdf(
-        out_dir / "world.sdf",
+        sdf_path,
         world.wall_layout,
         world.config,
         fixture_layout=world.fixture_layout,

@@ -75,14 +75,21 @@ from random_gazebo_world.visualize import (
 
 
 
-REQUIRED_OUTPUTS = (
-    "world.sdf",
+FIXED_REQUIRED_OUTPUTS = (
     "map.png",
     "map.yaml",
     "layout.json",
     "metadata.json",
     "nav_task.json",
 )
+
+
+def required_outputs(out_dir: Path) -> tuple[str, ...]:
+    return (f"{out_dir.name}.sdf",) + FIXED_REQUIRED_OUTPUTS
+
+
+# Deprecated: use required_outputs(out_dir) for directory-specific SDF naming.
+REQUIRED_OUTPUTS = required_outputs(Path("world"))
 
 REQUIRED_DEBUG_STAGES = (
     "01_partition",
@@ -395,7 +402,7 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
     export_world_sdf(
         world.wall_layout,
         world.config,
-        out_dir / "world.sdf",
+        out_dir / f"{out_dir.name}.sdf",
         fixture_layout=world.fixture_layout,
     )
     render_final_floorplan(world.wall_layout, debug_dir / "10_final_floorplan")
@@ -803,7 +810,7 @@ def _merge_fixture_walls(
 
 
 def _validate_output_tree(out_dir: Path) -> None:
-    for relative_path in REQUIRED_OUTPUTS:
+    for relative_path in required_outputs(out_dir):
         path = out_dir / relative_path
         if not path.is_file():
             raise WorldValidationError(f"Missing required output: {path}")

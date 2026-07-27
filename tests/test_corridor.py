@@ -13,8 +13,8 @@ from random_gazebo_world.corridor import (
 from random_gazebo_world.geometry import EPS, get_shared_wall
 from random_gazebo_world.pipeline import (
     REQUIRED_DEBUG_STAGES,
-    REQUIRED_OUTPUTS,
     generate_valid_world,
+    required_outputs,
     write_world_outputs,
 )
 from random_gazebo_world.rng import create_seeded_rng
@@ -171,7 +171,7 @@ def test_corridor_end_to_end_outputs(tmp_path: Path) -> None:
     out_dir = tmp_path / "corridor_world"
     write_world_outputs(world, out_dir)
 
-    for relative_path in REQUIRED_OUTPUTS:
+    for relative_path in required_outputs(out_dir):
         assert (out_dir / relative_path).is_file()
 
     debug_dir = out_dir / "debug"

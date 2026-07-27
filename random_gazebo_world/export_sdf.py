@@ -181,11 +181,13 @@ def export_world_sdf(
         mode=solid_export_mode,
     )
     fixture_mesh_uris = _build_fixture_mesh_uris(fixture_layout, config)
+    world_name = output_path.stem
     tree = _build_sdf_tree(
         boxes,
         solid_plan,
         config,
         wall_layout,
+        world_name=world_name,
         textures_enabled=config.textures_enabled,
         floor_texture_uri=floor_texture_uri,
         fixture_layout=fixture_layout,
@@ -707,6 +709,7 @@ def _build_sdf_tree(
     config: Config,
     wall_layout: WallLayout,
     *,
+    world_name: str,
     textures_enabled: bool = False,
     floor_texture_uri: str | None = None,
     fixture_layout: FixtureLayout | None = None,
@@ -717,7 +720,7 @@ def _build_sdf_tree(
     if fixture_mesh_uris is None:
         fixture_mesh_uris = {}
     sdf = ET.Element("sdf", version="1.10")
-    world = ET.SubElement(sdf, "world", name="generated_world")
+    world = ET.SubElement(sdf, "world", name=world_name)
     _append_world_environment(world, config)
     _append_ground_model(
         world,
