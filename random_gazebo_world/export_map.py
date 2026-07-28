@@ -38,6 +38,8 @@ class OccupancyMap:
     world_height: float
     start_cell: tuple[int, int]
     goal_cell: tuple[int, int]
+    start_yaw_offset: float = 0.0
+    goal_yaw_offset: float = 0.0
 
     @property
     def width(self) -> int:
@@ -97,8 +99,16 @@ def build_nav_task(occupancy: OccupancyMap) -> dict:
     heading = math.atan2(goal_y - start_y, goal_x - start_x)
     return {
         "frame_id": "map",
-        "start": {"x": start_x, "y": start_y, "yaw": heading},
-        "goal": {"x": goal_x, "y": goal_y, "yaw": heading},
+        "start": {
+            "x": start_x,
+            "y": start_y,
+            "yaw": heading + occupancy.start_yaw_offset,
+        },
+        "goal": {
+            "x": goal_x,
+            "y": goal_y,
+            "yaw": heading + occupancy.goal_yaw_offset,
+        },
         "map": {
             "resolution": occupancy.resolution,
             "origin": [occupancy.origin_x, occupancy.origin_y, 0.0],
@@ -125,6 +135,8 @@ def generate_occupancy_map(
     *,
     fixture_layout: FixtureLayout | None = None,
     pinned_start_goal_world: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    start_yaw_offset: float = 0.0,
+    goal_yaw_offset: float = 0.0,
 ) -> OccupancyMap:
     layout = wall_layout.opening_layout.applied_layout
     partition = layout.partition
@@ -210,6 +222,8 @@ def generate_occupancy_map(
         world_height=partition.world_height,
         start_cell=start_cell,
         goal_cell=goal_cell,
+        start_yaw_offset=start_yaw_offset,
+        goal_yaw_offset=goal_yaw_offset,
     )
     validate_occupancy_map(occupancy)
     return occupancy

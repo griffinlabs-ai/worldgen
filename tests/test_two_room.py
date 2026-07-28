@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -246,3 +247,109 @@ def test_corner_room_size_too_small_raises() -> None:
 def test_fixture_mode_not_allowed() -> None:
     with pytest.raises(ConfigError, match="fixture_mode"):
         _gate_config(fixture_mode="restroom_clusters")
+
+
+def test_zero_jitter_pins_start_goal_at_room_centers() -> None:
+    config = _gate_config(
+        start_jitter_x=0.0,
+        start_jitter_y=0.0,
+        start_jitter_yaw_deg=0.0,
+        goal_jitter_x=0.0,
+        goal_jitter_y=0.0,
+        goal_jitter_yaw_deg=0.0,
+    )
+    world = generate_valid_world(config)
+    layout = generate_two_room_gate_layout(config)
+    nav_task = build_nav_task(world.occupancy)
+    resolution = config.map_resolution
+
+    assert nav_task["start"]["x"] == pytest.approx(layout.room_centers[0].x, abs=resolution)
+    assert nav_task["start"]["y"] == pytest.approx(layout.room_centers[0].y, abs=resolution)
+    assert nav_task["goal"]["x"] == pytest.approx(layout.room_centers[1].x, abs=resolution)
+    assert nav_task["goal"]["y"] == pytest.approx(layout.room_centers[1].y, abs=resolution)
+
+
+def test_same_seed_and_jitter_produces_identical_nav_task() -> None:
+    overrides = {
+        "start_jitter_x": 0.4,
+        "start_jitter_y": 0.4,
+        "start_jitter_yaw_deg": 25.0,
+        "goal_jitter_x": 0.4,
+        "goal_jitter_y": 0.4,
+        "goal_jitter_yaw_deg": 10.0,
+        "random_seed": 7,
+    }
+    world_a = generate_valid_world(_gate_config(**overrides))
+    world_b = generate_valid_world(_gate_config(**overrides))
+    assert build_nav_task(world_a.occupancy) == build_nav_task(world_b.occupancy)
+
+
+def test_different_seeds_produce_different_jittered_poses_within_bounds() -> None:
+    overrides = {
+        "start_jitter_x": 0.4,
+        "start_jitter_y": 0.4,
+        "start_jitter_yaw_deg": 25.0,
+        "goal_jitter_x": 0.4,
+        "goal_jitter_y": 0.4,
+        "goal_jitter_yaw_deg": 25.0,
+    }
+    world_a = generate_valid_world(_gate_config(random_seed=1, **overrides))
+    world_b = generate_valid_world(_gate_config(random_seed=2, **overrides))
+    nav_a = build_nav_task(world_a.occupancy)
+    nav_b = build_nav_task(world_b.occupancy)
+    layout = generate_two_room_gate_layout(_gate_config(**overrides))
+
+    assert (nav_a["start"]["x"], nav_a["start"]["y"]) != (
+        nav_b["start"]["x"],
+        nav_b["start"]["y"],
+    )
+    assert nav_a["start"]["yaw"] != pytest.approx(nav_b["start"]["yaw"])
+
+    for nav, center_index in ((nav_a, 0), (nav_b, 0), (nav_a, 1), (nav_b, 1)):
+        prefix = "start" if center_index == 0 else "goal"
+        center = layout.room_centers[center_index]
+        assert abs(nav[prefix]["x"] - center.x) <= 0.4 + 1e-9
+        assert abs(nav[prefix]["y"] - center.y) <= 0.4 + 1e-9
+
+    assert world_a.start_goal_jitter is not None
+    for name, bound in (
+        ("start_jitter_x", 0.4),
+        ("start_jitter_y", 0.4),
+        ("start_jitter_yaw_deg", 25.0),
+        ("goal_jitter_x", 0.4),
+        ("goal_jitter_y", 0.4),
+        ("goal_jitter_yaw_deg", 25.0),
+    ):
+        assert abs(world_a.start_goal_jitter[name]) <= bound + 1e-9
+
+
+def test_yaw_jitter_offsets_heading_without_moving_poses() -> None:
+    config = _gate_config(
+        start_jitter_x=0.0,
+        start_jitter_y=0.0,
+        goal_jitter_x=0.0,
+        goal_jitter_y=0.0,
+        start_jitter_yaw_deg=15.0,
+        goal_jitter_yaw_deg=10.0,
+        random_seed=3,
+    )
+    world = generate_valid_world(config)
+    layout = generate_two_room_gate_layout(config)
+    nav_task = build_nav_task(world.occupancy)
+    resolution = config.map_resolution
+
+    assert nav_task["start"]["x"] == pytest.approx(layout.room_centers[0].x, abs=resolution)
+    assert nav_task["start"]["y"] == pytest.approx(layout.room_centers[0].y, abs=resolution)
+    assert nav_task["goal"]["x"] == pytest.approx(layout.room_centers[1].x, abs=resolution)
+    assert nav_task["goal"]["y"] == pytest.approx(layout.room_centers[1].y, abs=resolution)
+
+    heading = math.atan2(
+        nav_task["goal"]["y"] - nav_task["start"]["y"],
+        nav_task["goal"]["x"] - nav_task["start"]["x"],
+    )
+    assert world.start_goal_jitter is not None
+    start_yaw_offset = math.radians(world.start_goal_jitter["start_jitter_yaw_deg"])
+    goal_yaw_offset = math.radians(world.start_goal_jitter["goal_jitter_yaw_deg"])
+    assert nav_task["start"]["yaw"] == pytest.approx(heading + start_yaw_offset, abs=1e-9)
+    assert nav_task["goal"]["yaw"] == pytest.approx(heading + goal_yaw_offset, abs=1e-9)
+    assert nav_task["start"]["yaw"] != pytest.approx(nav_task["goal"]["yaw"])

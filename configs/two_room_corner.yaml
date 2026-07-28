@@ -11,3 +11,9 @@ random_seed: 42
 max_attempts: 1
 ground_thickness: 0.1
 fixture_mode: none
+start_jitter_x: 0.0
+start_jitter_y: 0.0
+start_jitter_yaw_deg: 0.0
+goal_jitter_x: 0.0
+goal_jitter_y: 0.0
+goal_jitter_yaw_deg: 0.0

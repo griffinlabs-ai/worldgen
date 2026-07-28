@@ -45,6 +45,12 @@ class Config:
     room_size: float | None = None
     gate_width: float | None = None
     divider_thickness: float | None = None
+    start_jitter_x: float = 0.0
+    start_jitter_y: float = 0.0
+    start_jitter_yaw_deg: float = 0.0
+    goal_jitter_x: float = 0.0
+    goal_jitter_y: float = 0.0
+    goal_jitter_yaw_deg: float = 0.0
     leg_a_width: float | None = None
     leg_a_length: float | None = None
     leg_b_width: float | None = None
@@ -227,6 +233,15 @@ class Config:
         _require_positive_int(self.max_attempts, "max_attempts")
         _require_positive(self.ground_thickness, "ground_thickness")
         _require_positive(self.floor_tile_size, "floor_tile_size")
+        for name in (
+            "start_jitter_x",
+            "start_jitter_y",
+            "start_jitter_yaw_deg",
+            "goal_jitter_x",
+            "goal_jitter_y",
+            "goal_jitter_yaw_deg",
+        ):
+            _require_non_negative(getattr(self, name), name)
         _validate_fixture_visual_offsets(self)
         _validate_cubicle_settings(self)
         _validate_visual_physics_settings(self)
@@ -441,6 +456,12 @@ def load_config(path: Path | str) -> Config:
             room_size=raw.get("room_size"),
             gate_width=raw.get("gate_width"),
             divider_thickness=raw.get("divider_thickness"),
+            start_jitter_x=raw.get("start_jitter_x", 0.0),
+            start_jitter_y=raw.get("start_jitter_y", 0.0),
+            start_jitter_yaw_deg=raw.get("start_jitter_yaw_deg", 0.0),
+            goal_jitter_x=raw.get("goal_jitter_x", 0.0),
+            goal_jitter_y=raw.get("goal_jitter_y", 0.0),
+            goal_jitter_yaw_deg=raw.get("goal_jitter_yaw_deg", 0.0),
             leg_a_width=raw.get("leg_a_width"),
             leg_a_length=raw.get("leg_a_length"),
             leg_b_width=raw.get("leg_b_width"),
@@ -506,6 +527,12 @@ def _require_field(raw: dict[str, Any], name: str) -> Any:
 def _require_positive(value: float, name: str) -> None:
     if value <= 0:
         raise ConfigError(f"{name} must be positive, got {value}")
+
+
+def _require_non_negative(value: float, name: str) -> None:
+    _require_finite_number(value, name)
+    if value < 0:
+        raise ConfigError(f"{name} must be non-negative, got {value}")
 
 
 def _require_positive_int(value: int, name: str) -> None:

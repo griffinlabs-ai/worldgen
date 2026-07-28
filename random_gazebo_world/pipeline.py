@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 import shutil
 import sys
@@ -159,6 +160,7 @@ class GeneratedWorld:
     layout_document: LayoutDocument
     attempt: int
     room_centers: tuple | None = None
+    start_goal_jitter: dict[str, float] | None = None
 
 
 class _RetryDiagnostics:
@@ -372,6 +374,7 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
         world.selected_graph,
         nav_task=nav_task,
         room_centers=world.room_centers,
+        start_goal_jitter=world.start_goal_jitter,
     )
     render_partition(world.partition, debug_dir / "01_partition")
     render_selected_rooms(
@@ -603,6 +606,50 @@ def _attempt_corridor_world(
     )
 
 
+def _sample_two_room_start_goal_jitter(
+    config: Config,
+    rng: random.Random,
+) -> tuple[
+    tuple[float, float],
+    tuple[float, float],
+    float,
+    float,
+    dict[str, float],
+]:
+    """Sample start/goal pose jitter for two-room layouts.
+
+    Draw order (fixed for reproducibility): start x, start y, start yaw deg,
+    goal x, goal y, goal yaw deg.
+    """
+    start_dx = _uniform_jitter(rng, config.start_jitter_x)
+    start_dy = _uniform_jitter(rng, config.start_jitter_y)
+    start_dyaw_deg = _uniform_jitter(rng, config.start_jitter_yaw_deg)
+    goal_dx = _uniform_jitter(rng, config.goal_jitter_x)
+    goal_dy = _uniform_jitter(rng, config.goal_jitter_y)
+    goal_dyaw_deg = _uniform_jitter(rng, config.goal_jitter_yaw_deg)
+    sampled = {
+        "start_jitter_x": start_dx,
+        "start_jitter_y": start_dy,
+        "start_jitter_yaw_deg": start_dyaw_deg,
+        "goal_jitter_x": goal_dx,
+        "goal_jitter_y": goal_dy,
+        "goal_jitter_yaw_deg": goal_dyaw_deg,
+    }
+    return (
+        (start_dx, start_dy),
+        (goal_dx, goal_dy),
+        math.radians(start_dyaw_deg),
+        math.radians(goal_dyaw_deg),
+        sampled,
+    )
+
+
+def _uniform_jitter(rng: random.Random, bound: float) -> float:
+    if bound == 0.0:
+        return 0.0
+    return rng.uniform(-bound, bound)
+
+
 def _attempt_two_room_world(
     config: Config,
     attempt: int,
@@ -625,6 +672,15 @@ def _attempt_two_room_world(
     else:
         raise WorldGenerationError(f"Unsupported two-room layout mode: {config.layout_mode}")
 
+    jitter_rng = create_seeded_rng(config.random_seed)
+    (
+        (start_dx, start_dy),
+        (goal_dx, goal_dy),
+        start_yaw_offset,
+        goal_yaw_offset,
+        start_goal_jitter,
+    ) = _sample_two_room_start_goal_jitter(config, jitter_rng)
+
     attempt_config = layout.config
     if layout.passage_geometry is None:
         passage_geometry = _run_retryable_stage(
@@ -639,8 +695,8 @@ def _attempt_two_room_world(
         passage_geometry = layout.passage_geometry
 
     pinned_start_goal = (
-        (layout.room_centers[0].x, layout.room_centers[0].y),
-        (layout.room_centers[1].x, layout.room_centers[1].y),
+        (layout.room_centers[0].x + start_dx, layout.room_centers[0].y + start_dy),
+        (layout.room_centers[1].x + goal_dx, layout.room_centers[1].y + goal_dy),
     )
     wall_layout = _run_retryable_stage(
         "walls",
@@ -671,6 +727,8 @@ def _attempt_two_room_world(
             create_seeded_rng(attempt_config.random_seed),
             fixture_layout=fixture_layout,
             pinned_start_goal_world=pinned_start_goal,
+            start_yaw_offset=start_yaw_offset,
+            goal_yaw_offset=goal_yaw_offset,
         ),
     )
     layout_document = build_layout_document(
@@ -696,6 +754,7 @@ def _attempt_two_room_world(
         layout_document=layout_document,
         attempt=attempt,
         room_centers=layout.room_centers,
+        start_goal_jitter=start_goal_jitter,
     )
 
 
