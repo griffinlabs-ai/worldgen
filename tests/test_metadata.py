@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
 from random_gazebo_world.adjacency import build_adjacency_graph
 from random_gazebo_world.config import Config
+from random_gazebo_world.export_map import OccupancyMap
 from random_gazebo_world.geometry import Cell
 from random_gazebo_world.metadata import (
     build_layout_document,
@@ -79,6 +82,40 @@ def test_layout_json_round_trips(tmp_path: Path) -> None:
     export_layout_json(layout_path, document)
     loaded = load_layout_json(layout_path)
     assert loaded == document
+
+
+def test_metadata_json_includes_free_space_when_occupancy_provided(
+    tmp_path: Path,
+) -> None:
+    config, selected, _, document = _build_pipeline({0, 1, 3}, _sample_config(), 7)
+    occupancy = OccupancyMap(
+        data=np.full((4, 4), 254, dtype=np.uint8),
+        resolution=0.05,
+        origin_x=0.0,
+        origin_y=0.0,
+        world_width=10.0,
+        world_height=10.0,
+        start_cell=(0, 0),
+        goal_cell=(3, 3),
+        free_cell_count=16,
+        free_area_m2=16 * 0.05 * 0.05,
+    )
+    metadata_path = tmp_path / "metadata.json"
+    export_metadata_json(
+        metadata_path,
+        config,
+        document,
+        selected,
+        occupancy=occupancy,
+    )
+
+    payload = load_metadata_json(metadata_path)
+    assert payload["free_space"] == {
+        "free_cells": 16,
+        "free_area_m2": 16 * 0.05 * 0.05,
+        "resolution": 0.05,
+        "map_image": "map.png",
+    }
 
 
 def test_metadata_json_records_seed_and_config(tmp_path: Path) -> None:

@@ -375,6 +375,7 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
         nav_task=nav_task,
         room_centers=world.room_centers,
         start_goal_jitter=world.start_goal_jitter,
+        occupancy=world.occupancy,
     )
     render_partition(world.partition, debug_dir / "01_partition")
     render_selected_rooms(

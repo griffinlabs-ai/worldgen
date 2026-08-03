@@ -38,6 +38,8 @@ class OccupancyMap:
     world_height: float
     start_cell: tuple[int, int]
     goal_cell: tuple[int, int]
+    free_cell_count: int
+    free_area_m2: float
     start_yaw_offset: float = 0.0
     goal_yaw_offset: float = 0.0
 
@@ -213,6 +215,8 @@ def generate_occupancy_map(
             origin_y,
             rng,
         )
+    free_cell_count = int(np.sum(grid == FREE_VALUE))
+    free_area_m2 = free_cell_count * resolution * resolution
     occupancy = OccupancyMap(
         data=grid,
         resolution=resolution,
@@ -222,6 +226,8 @@ def generate_occupancy_map(
         world_height=partition.world_height,
         start_cell=start_cell,
         goal_cell=goal_cell,
+        free_cell_count=free_cell_count,
+        free_area_m2=free_area_m2,
         start_yaw_offset=start_yaw_offset,
         goal_yaw_offset=goal_yaw_offset,
     )

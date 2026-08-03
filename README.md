@@ -330,6 +330,63 @@ This avoids Gazebo warnings from the older `static="true"` attribute form. The
 default world name in exported SDF is `generated_world`; rename it when
 installing into another package (see [Using a Generated World in the TCR Simulation](#using-a-generated-world-in-the-tcr-simulation)).
 
+## Ground-truth Free-space Contract
+
+Stable occupancy-map semantics for AUT-145 and downstream Nav2/benchmark
+consumers. Every successful run exports `map.png`, `map.yaml`, and (when the
+map stage completes) a matching `metadata.json` `free_space` block through the
+shared `export_occupancy_map` path in `random_gazebo_world/export_map.py`.
+
+### `map.png`
+
+- Pixel value **`0`** = occupied (walls, solid fills, fixture collision
+  footprints).
+- Pixel value **`254`** = free (walkable room and passage interior).
+- **Row 0 is the top** of the image (maximum world +Y); columns increase with
+  world +X. Matches Nav2 map-server image orientation.
+
+### `map.yaml`
+
+Nav2 map metadata written alongside `map.png`:
+
+| Field | Value |
+| --- | --- |
+| `image` | `"map.png"` |
+| `resolution` | Metres per pixel from config `map_resolution` |
+| `origin` | `[0, 0, 0]` (world origin at the bottom-left corner of the map image) |
+| `negate` | `0` |
+| `occupied_thresh` | `0.65` |
+| `free_thresh` | `0.196` |
+
+Grid dimensions in pixels:
+
+- `width = ceil(world_width / resolution)`
+- `height = ceil(world_height / resolution)`
+
+(`world_width` / `world_height` come from the generated partition bounds.)
+
+### `metadata.json` → `free_space`
+
+When occupancy is exported, `metadata.json` includes:
+
+```json
+"free_space": {
+  "free_cells": <int>,
+  "free_area_m2": <float>,
+  "resolution": <float>,
+  "map_image": "map.png"
+}
+```
+
+`free_area_m2 = free_cells * resolution²`.
+
+### Stability
+
+This contract is the **M6 gate** for `partition_method: bsp`. It is designed
+to generalize: `voronoi`, `corridor`, `two_room_gate`, and `two_room_corner`
+layouts honor the same export path and should produce maps conforming to these
+semantics.
+
 ## Validate And View In Gazebo
 
 Validate a generated SDF:

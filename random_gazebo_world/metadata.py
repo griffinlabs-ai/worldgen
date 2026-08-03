@@ -9,6 +9,7 @@ from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
 from random_gazebo_world.config import Config
+from random_gazebo_world.export_map import OccupancyMap
 from random_gazebo_world.fixtures import (
     DEFAULT_FIXTURE_VISUAL_OFFSETS,
     EMPTY_FIXTURE_LAYOUT,
@@ -111,6 +112,7 @@ def export_metadata_json(
     nav_task: dict[str, Any] | None = None,
     room_centers: tuple[Any, ...] | None = None,
     start_goal_jitter: dict[str, float] | None = None,
+    occupancy: OccupancyMap | None = None,
 ) -> None:
     payload = {
         "seed": config.random_seed,
@@ -153,6 +155,13 @@ def export_metadata_json(
             "spanning_tree_connections": len(selected_graph.spanning_tree_connections),
         },
     }
+    if occupancy is not None:
+        payload["free_space"] = {
+            "free_cells": occupancy.free_cell_count,
+            "free_area_m2": occupancy.free_area_m2,
+            "resolution": occupancy.resolution,
+            "map_image": "map.png",
+        }
     if nav_task is not None:
         payload["nav_task"] = nav_task
     if room_centers is not None:

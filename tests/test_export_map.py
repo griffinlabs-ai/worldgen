@@ -1,19 +1,26 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import numpy as np
+import pytest
 import yaml
+from PIL import Image
 
 from random_gazebo_world.adjacency import build_adjacency_graph
 from random_gazebo_world.config import Config
 from random_gazebo_world.export_map import (
+    FREE_VALUE,
     build_nav_task,
     cell_to_world,
     export_nav_task_json,
     export_occupancy_map,
     generate_occupancy_map,
     validate_occupancy_map,
+    write_occupancy_map_files,
 )
+from random_gazebo_world.metadata import build_layout_document, export_metadata_json
 from random_gazebo_world.geometry import Cell
 from random_gazebo_world.openings import generate_openings
 from random_gazebo_world.partition import Partition, generate_partition
@@ -59,6 +66,24 @@ def _grid_partition() -> Partition:
         Cell.from_origin_size(3, 5.0, 5.0, 5.0, 5.0),
     )
     return Partition(cells=cells, world_width=10.0, world_height=10.0)
+
+
+def _assert_free_space_contract(
+    out_dir: Path,
+    metadata: dict[str, object],
+    resolution: float,
+) -> None:
+    free_space = metadata["free_space"]
+    assert isinstance(free_space, dict)
+    assert free_space["map_image"] == "map.png"
+    map_path = out_dir / str(free_space["map_image"])
+    assert map_path.is_file()
+    pixels = np.asarray(Image.open(map_path))
+    free_cells_from_png = int(np.sum(pixels == FREE_VALUE))
+    assert free_space["free_cells"] == free_cells_from_png
+    assert free_space["resolution"] == pytest.approx(resolution)
+    expected_area = free_cells_from_png * resolution * resolution
+    assert free_space["free_area_m2"] == pytest.approx(expected_area)
 
 
 def _build_wall_layout(room_ids: set[int], config: Config, seed: int):
@@ -151,7 +176,7 @@ def test_export_nav_task_json_round_trips(tmp_path: Path) -> None:
     assert loaded == task
 
 
-def test_generated_world_occupancy_map_validates() -> None:
+def test_generated_world_occupancy_map_validates(tmp_path: Path) -> None:
     config = _sample_config()
     partition = generate_partition(config, create_seeded_rng(42))
     adjacency = build_adjacency_graph(partition)
@@ -164,5 +189,16 @@ def test_generated_world_occupancy_map_validates() -> None:
     applied = apply_connections(selected, adjacency)
     opening_layout = generate_openings(applied, config, create_seeded_rng(1001))
     wall_layout = generate_walls(opening_layout, adjacency, config)
+    document = build_layout_document(applied, opening_layout, wall_layout)
     occupancy = generate_occupancy_map(wall_layout, config, create_seeded_rng(2000))
     validate_occupancy_map(occupancy)
+    write_occupancy_map_files(occupancy, tmp_path)
+    export_metadata_json(
+        tmp_path / "metadata.json",
+        config,
+        document,
+        selected,
+        occupancy=occupancy,
+    )
+    metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
+    _assert_free_space_contract(tmp_path, metadata, config.map_resolution)

@@ -96,6 +96,8 @@ def _broken_world() -> GeneratedWorld:
         world_height=5.0,
         start_cell=(0, 0),
         goal_cell=(0, 0),
+        free_cell_count=1,
+        free_area_m2=0.05 * 0.05,
     )
     return GeneratedWorld(
         config=_sample_config(min_room_count=2, max_room_count=2),

@@ -4,12 +4,14 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
+from PIL import Image
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 from random_gazebo_world.config import Config, ConfigError, load_config
-from random_gazebo_world.export_map import build_nav_task, cell_to_world
+from random_gazebo_world.export_map import FREE_VALUE, build_nav_task, cell_to_world
 from random_gazebo_world.pipeline import (
     REQUIRED_DEBUG_STAGES,
     generate_valid_world,
@@ -53,6 +55,24 @@ def _gate_config(**overrides: float | int | str) -> Config:
     config = Config(**values)  # type: ignore[arg-type]
     config.validate()
     return config
+
+
+def _assert_free_space_contract(
+    out_dir: Path,
+    metadata: dict[str, object],
+    resolution: float,
+) -> None:
+    free_space = metadata["free_space"]
+    assert isinstance(free_space, dict)
+    assert free_space["map_image"] == "map.png"
+    map_path = out_dir / str(free_space["map_image"])
+    assert map_path.is_file()
+    pixels = np.asarray(Image.open(map_path))
+    free_cells_from_png = int(np.sum(pixels == FREE_VALUE))
+    assert free_space["free_cells"] == free_cells_from_png
+    assert free_space["resolution"] == pytest.approx(resolution)
+    expected_area = free_cells_from_png * resolution * resolution
+    assert free_space["free_area_m2"] == pytest.approx(expected_area)
 
 
 def _corner_config(**overrides: float | int | str) -> Config:
@@ -189,6 +209,7 @@ def test_gate_end_to_end_outputs_and_pins_nav_task(tmp_path: Path) -> None:
     assert len(metadata["room_centers"]) == 2
     assert metadata["room_centers"][0]["cell_id"] == ROOM_A_CELL_ID
     assert metadata["room_centers"][1]["cell_id"] == ROOM_B_CELL_ID
+    _assert_free_space_contract(out_dir, metadata, config.map_resolution)
 
     nav_task = json.loads((out_dir / "nav_task.json").read_text(encoding="utf-8"))
     resolution = config.map_resolution
@@ -221,6 +242,7 @@ def test_corner_end_to_end_outputs_and_pins_nav_task(tmp_path: Path) -> None:
 
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     assert "room_centers" in metadata
+    _assert_free_space_contract(out_dir, metadata, config.map_resolution)
     nav_task = build_nav_task(world.occupancy)
     start_x, start_y = cell_to_world(world.occupancy.start_cell, world.occupancy)
     assert nav_task["start"]["x"] == pytest.approx(start_x)
