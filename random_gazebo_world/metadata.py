@@ -156,12 +156,16 @@ def export_metadata_json(
         },
     }
     if occupancy is not None:
-        payload["free_space"] = {
+        free_space: dict[str, Any] = {
             "free_cells": occupancy.free_cell_count,
             "free_area_m2": occupancy.free_area_m2,
             "resolution": occupancy.resolution,
             "map_image": "map.png",
         }
+        if config.min_free_area_m2 is not None:
+            free_space["min_free_area_m2"] = config.min_free_area_m2
+            free_space["max_free_area_m2"] = config.max_free_area_m2
+        payload["free_space"] = free_space
     if nav_task is not None:
         payload["nav_task"] = nav_task
     if room_centers is not None:

@@ -95,6 +95,9 @@ class Config:
     physics_profile: str = "ignored"
     counter_specular: tuple[float, float, float] = (0.4, 0.4, 0.4)
     fixture_friction_mu: float = 10000.2
+    min_free_area_m2: float | None = None
+    max_free_area_m2: float | None = None
+    room_count_world_size: dict[int, float] | None = None
 
     def validate(self) -> None:
         if self.layout_mode not in (
@@ -197,6 +200,28 @@ class Config:
                 "partition_method 'bsp', got "
                 f"{self.partition_method!r}"
             )
+        self._validate_free_area_settings()
+
+    def _validate_free_area_settings(self) -> None:
+        min_area = self.min_free_area_m2
+        max_area = self.max_free_area_m2
+        if (min_area is None) != (max_area is None):
+            raise ConfigError(
+                "min_free_area_m2 and max_free_area_m2 must both be set or both omitted"
+            )
+        if min_area is not None:
+            _require_non_negative(min_area, "min_free_area_m2")
+            _require_non_negative(max_area, "max_free_area_m2")
+            _require_min_max(min_area, max_area, "free area")
+        if self.room_count_world_size is None:
+            return
+        for key, side in self.room_count_world_size.items():
+            if not isinstance(key, int) or isinstance(key, bool):
+                raise ConfigError(
+                    f"room_count_world_size keys must be positive ints, got {key!r}"
+                )
+            _require_positive_int(key, "room_count_world_size key")
+            _require_positive(side, f"room_count_world_size[{key}]")
 
     def _validate_fixture_settings(self) -> None:
         if self.fixture_mode not in ("none", "restroom_clusters"):
@@ -508,6 +533,9 @@ def load_config(path: Path | str) -> Config:
             physics_profile=raw.get("physics_profile", "ignored"),
             counter_specular=_load_rgb(raw, "counter_specular", (0.4, 0.4, 0.4)),
             fixture_friction_mu=raw.get("fixture_friction_mu", 10000.2),
+            min_free_area_m2=raw.get("min_free_area_m2"),
+            max_free_area_m2=raw.get("max_free_area_m2"),
+            room_count_world_size=_load_room_count_world_size(raw),
         )
     except KeyError as exc:
         raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc
@@ -516,6 +544,28 @@ def load_config(path: Path | str) -> Config:
 
     config.validate()
     return config
+
+
+def _load_room_count_world_size(raw: dict[str, Any]) -> dict[int, float] | None:
+    value = raw.get("room_count_world_size")
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ConfigError("room_count_world_size must be a mapping")
+    parsed: dict[int, float] = {}
+    for key, side in value.items():
+        try:
+            room_count = int(key)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"room_count_world_size keys must be positive ints, got {key!r}"
+            ) from exc
+        if not isinstance(side, (int, float)) or isinstance(side, bool):
+            raise ConfigError(
+                f"room_count_world_size[{room_count}] must be a number, got {side!r}"
+            )
+        parsed[room_count] = float(side)
+    return parsed
 
 
 def _require_field(raw: dict[str, Any], name: str) -> Any:

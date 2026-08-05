@@ -5,7 +5,7 @@ import random
 import shutil
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, TypeVar
 
@@ -238,7 +238,9 @@ def generate_valid_world(
     )
 
     for attempt in range(structural_attempts):
-        attempt_config = config.with_seed(config.random_seed + attempt)
+        attempt_config = _apply_room_count_world_size(
+            config.with_seed(config.random_seed + attempt)
+        )
         rng = create_seeded_rng(attempt_config.random_seed)
         if attempt_config.layout_mode == "corridor":
             try:
@@ -582,6 +584,11 @@ def _attempt_corridor_world(
             wall_layout, attempt_config, rng, fixture_layout=fixture_layout
         ),
     )
+    _run_retryable_stage(
+        "map_task",
+        context=base_context,
+        operation=lambda: _validate_free_area_band(attempt_config, occupancy),
+    )
     layout_document = build_layout_document(
         layout.applied_layout,
         layout.opening_layout,
@@ -732,6 +739,11 @@ def _attempt_two_room_world(
             goal_yaw_offset=goal_yaw_offset,
         ),
     )
+    _run_retryable_stage(
+        "map_task",
+        context=base_context,
+        operation=lambda: _validate_free_area_band(attempt_config, occupancy),
+    )
     layout_document = build_layout_document(
         layout.applied_layout,
         layout.opening_layout,
@@ -823,6 +835,11 @@ def _attempt_selection(
             wall_layout, config, rng, fixture_layout=fixture_layout
         ),
     )
+    _run_retryable_stage(
+        "map_task",
+        context=base_context,
+        operation=lambda: _validate_free_area_band(config, occupancy),
+    )
     layout_document = build_layout_document(
         applied_layout,
         opening_layout,
@@ -853,6 +870,29 @@ def _attempt_selection(
         operation=lambda: validate_world_connectivity(world),
     )
     return world
+
+
+def _apply_room_count_world_size(config: Config) -> Config:
+    mapping = config.room_count_world_size
+    if mapping is None or config.min_room_count != config.max_room_count:
+        return config
+    side = mapping.get(config.min_room_count)
+    if side is None:
+        return config
+    return replace(config, world_width=side, world_height=side)
+
+
+def _validate_free_area_band(config: Config, occupancy: OccupancyMap) -> None:
+    if config.min_free_area_m2 is None:
+        return
+    lo = config.min_free_area_m2
+    hi = config.max_free_area_m2
+    area = occupancy.free_area_m2
+    if lo <= area <= hi:
+        return
+    raise WorldValidationError(
+        f"free_area_m2 {area:.2f} outside band [{lo}, {hi}]"
+    )
 
 
 def _merge_fixture_walls(
