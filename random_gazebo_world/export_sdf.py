@@ -1320,7 +1320,8 @@ def _build_fixture_mesh_uris(
     if not config.fixture_models_dir:
         raise SdfExportError("fixture_models_dir is required to export fixture meshes")
 
-    models_dir = Path(config.fixture_models_dir)
+    models_dir = config.fixture_models_path
+    assert models_dir is not None  # guarded by the falsy check above
     uris: dict[str, str] = {}
     for relpath in sorted(fixture_layout.mesh_relpaths):
         src = models_dir / relpath
@@ -1585,7 +1586,9 @@ def _validate_fixtures_model(
                 raise SdfExportError(
                     "fixture_models_dir is required to validate fixture meshes"
                 )
-            mesh_path = Path(config.fixture_models_dir) / instance.mesh_relpath
+            models_root = config.fixture_models_path
+            assert models_root is not None  # guarded by the falsy check above
+            mesh_path = models_root / instance.mesh_relpath
             if not mesh_path.is_file():
                 raise SdfExportError(f"Fixture mesh file not found: {mesh_path}")
 

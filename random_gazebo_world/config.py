@@ -99,6 +99,18 @@ class Config:
     max_free_area_m2: float | None = None
     room_count_world_size: dict[int, float] | None = None
 
+    @property
+    def fixture_models_path(self) -> Path | None:
+        """``fixture_models_dir`` with ``~`` expanded, or ``None`` when unset.
+
+        Every consumer must go through this rather than ``Path(fixture_models_dir)``
+        directly, so a config can name the model tree portably (``~/tcr/...``) instead
+        of hardcoding one developer's home directory.
+        """
+        if not self.fixture_models_dir:
+            return None
+        return Path(self.fixture_models_dir).expanduser()
+
     def validate(self) -> None:
         if self.layout_mode not in (
             "partition",
@@ -237,7 +249,8 @@ class Config:
             raise ConfigError(
                 "fixture_models_dir is required when fixture_mode is not 'none'"
             )
-        models_dir = Path(self.fixture_models_dir)
+        models_dir = self.fixture_models_path
+        assert models_dir is not None  # guarded by the falsy check above
         if not models_dir.is_dir():
             raise ConfigError(
                 f"fixture_models_dir must be an existing directory, got {models_dir}"

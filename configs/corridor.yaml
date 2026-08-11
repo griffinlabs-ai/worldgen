@@ -14,7 +14,7 @@ max_attempts: 1000
 textures_enabled: true
 floor_tile_size: 0.5
 fixture_mode: restroom_clusters
-fixture_models_dir: /home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models
+fixture_models_dir: ~/tcr/ros_ws/src/utils/tcr_ignition/models
 fixture_toilet_offset_x: 0.0
 fixture_toilet_offset_y: 0.458
 fixture_toilet_offset_z: 0.0
@@ -33,7 +33,17 @@ fixture_urinal_count_min: 2
 fixture_urinal_count_max: 5
 fixture_basin_count_min: 1
 fixture_basin_count_max: 3
-cubicle_door_width: 0.65
+# 0.85, raised from 0.65 (AUT-222). Entering a cubicle from a room is a turn-in, so it is
+# bounded by the CORNER frontier, not the gate frontier. Measured on the 1.10 x 0.47 m TCR
+# robot (BENCHMARK_FINDINGS.md §9b): corner 0.78 -> 53.3% pass, 0.81 -> 100%. At 0.65 the
+# robot cannot enter at all, which would have made every toilet unreachable and any
+# "reach each fixture" metric a measurement of an impossible task.
+#
+# 0.85 sits above the 0.81 fully-passing arm with margin, and deliberately below the 0.90 m
+# room gates so cubicle entry stays the tightest opening in the world -- the thing a tuning
+# study should be stressed against. Upper bound is cubicle_door_width + wall_thickness <=
+# 1.5 (toilet cubicle pitch), i.e. 1.35 here, so there is headroom if it needs to go wider.
+cubicle_door_width: 0.85
 # cubicle_wall_height: 2.0
 cubicle_wall_color: [0.36, 0.47, 0.55]
 lighting_mode: point

@@ -51,8 +51,8 @@ from random_gazebo_world.walls import WallLayout, generate_walls
 
 
 FIXTURE_MODELS_DIR = Path(
-    "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
-)
+    "~/tcr/ros_ws/src/utils/tcr_ignition/models"
+).expanduser()
 
 
 def _sample_config(**overrides: float | int | str | bool | None) -> Config:

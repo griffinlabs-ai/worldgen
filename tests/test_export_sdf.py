@@ -130,8 +130,8 @@ def test_wall_segment_to_box_uses_segment_height_override() -> None:
 
 def test_export_world_sdf_reflects_cubicle_wall_height(tmp_path: Path) -> None:
     fixture_models = Path(
-        "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
-    )
+        "~/tcr/ros_ws/src/utils/tcr_ignition/models"
+    ).expanduser()
     if not fixture_models.is_dir():
         pytest.skip("fixture models directory not available")
 
@@ -596,8 +596,8 @@ def test_export_world_sdf_ode_physics_profile(tmp_path: Path) -> None:
 
 def test_export_world_sdf_laminate_cubicle_walls_skip_skirting(tmp_path: Path) -> None:
     fixture_models = Path(
-        "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
-    )
+        "~/tcr/ros_ws/src/utils/tcr_ignition/models"
+    ).expanduser()
     if not fixture_models.is_dir():
         pytest.skip("fixture models directory not available")
 
@@ -666,8 +666,8 @@ def test_export_world_sdf_laminate_cubicle_walls_skip_skirting(tmp_path: Path) -
 
 def test_export_world_sdf_counter_specular_and_friction(tmp_path: Path) -> None:
     fixture_models = Path(
-        "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
-    )
+        "~/tcr/ros_ws/src/utils/tcr_ignition/models"
+    ).expanduser()
     if not fixture_models.is_dir():
         pytest.skip("fixture models directory not available")
 

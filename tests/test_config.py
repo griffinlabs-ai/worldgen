@@ -186,8 +186,8 @@ def test_fixture_count_validation_raises(
 
 def test_fixture_count_feasibility_raises_in_corridor_mode(tmp_path: Path) -> None:
     if not Path(
-        "/home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models"
-    ).is_dir():
+        "~/tcr/ros_ws/src/utils/tcr_ignition/models"
+    ).expanduser().is_dir():
         pytest.skip("fixture models directory not available")
     config_path = tmp_path / "corridor_infeasible.yaml"
     config_path.write_text(
@@ -206,7 +206,7 @@ def test_fixture_count_feasibility_raises_in_corridor_mode(tmp_path: Path) -> No
                 "map_resolution: 0.05",
                 "random_seed: 42",
                 "fixture_mode: restroom_clusters",
-                "fixture_models_dir: /home/griffinlabs/tcr/ros_ws/src/utils/tcr_ignition/models",
+                "fixture_models_dir: ~/tcr/ros_ws/src/utils/tcr_ignition/models",
                 "fixture_toilet_count_min: 2",
             ]
         ),
