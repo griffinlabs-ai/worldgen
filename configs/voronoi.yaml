@@ -1,0 +1,37 @@
+# Voronoi partition reference config.
+#
+# Same world as configs/default.yaml, partitioned by Lloyd-relaxed Voronoi cells
+# instead of BSP splits. Two keys must move together with partition_method:
+#
+#   passage_geometry_mode: curved   -- legacy_orthogonal requires bsp
+#   fixture_mode:          none     -- restroom_clusters is rejected on voronoi
+#
+# Voronoi cells are not axis-aligned, so leftover space is exported as OBJ meshes
+# under meshes/ and referenced by absolute file:// URI. See README § Voronoi
+# partition before using these worlds in a container (AUT-144).
+world_width: 20.0
+world_height: 20.0
+min_cell_size: 2.0
+max_cell_size: 6.0
+min_room_count: 7
+max_room_count: 15
+wall_height: 2.5
+wall_thickness: 0.15
+gate_width_min: 0.78
+gate_width_max: 0.78
+passage_width_min: 1.1
+passage_width_max: 1.1
+max_openings_per_passage_edge: 1
+max_open_edges_per_passage: 4
+extra_loop_probability: 0.2
+map_resolution: 0.05
+random_seed: 10667
+max_attempts: 100000
+max_selection_attempts: 64
+ground_thickness: 0.1
+partition_method: voronoi
+passage_geometry_mode: curved
+voronoi_seed_count: 16
+voronoi_lloyd_iterations: 8
+voronoi_min_cell_area: 1.0
+voronoi_max_cell_area: 64.0
