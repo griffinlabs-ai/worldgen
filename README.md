@@ -14,15 +14,16 @@ Each links to its own chapter with a runnable command.
 
 | Mode | Config key | What it generates | In autotuner | Preview |
 | --- | --- | --- | --- | --- |
-| [**BSP partition**](#bsp-partition) | `layout_mode: partition`<br>`partition_method: bsp` | Recursive axis-aligned splits into rooms, gates and routed passages. The general-purpose mode. | **Everything that runs today.** Exploration (`bsp_rooms`, room-count axis; `bsp_rooms_fixed_area`, AUT-185) and both random narrow-passage scenarios (`two_room_gate`, `two_room_corner` — 2-room BSP worlds despite the names). | <img src="docs/modes/bsp.png" width="230"> |
-| [**Voronoi partition**](#voronoi-partition) | `layout_mode: partition`<br>`partition_method: voronoi` | Lloyd-relaxed Voronoi cells — non-orthogonal rooms and angled walls. | **None — do not use yet.** Leftover space exports as OBJ meshes with absolute `file://` URIs, which a containerized sim cannot resolve. AUT-144 open; never validated in Gazebo or a trial. | <img src="docs/modes/voronoi.png" width="230"> |
-| [**Two-room gate**](#two-room-gate) | `layout_mode: two_room_gate` | Two fixed square rooms sharing a divider with one centred gate. Geometry is exact, not sampled. | `narrow_passage_fixed_gate` (config `two_room_gate_fixed`) — the deterministic gate-width axis, where a random layout would confound the measurement. | <img src="docs/modes/two_room_gate.png" width="230"> |
-| [**Two-room corner**](#two-room-corner) | `layout_mode: two_room_corner` | Two fixed rooms joined by an L-shaped passage of two independently-sized legs. | `narrow_passage_fixed_corner` (config `two_room_corner_fixed`) — the deterministic corner-width axis. | <img src="docs/modes/two_room_corner.png" width="230"> |
-| [**Corridor**](#corridor) | `layout_mode: corridor` | A fixed-length corridor with rooms tiled along both sides, one entrance each — plus restroom fixtures, textures, point lighting and ODE physics. | **None.** The only mode with fixtures, and the one used for hand-installed TCR sim worlds — see [Using a generated world in the TCR simulation](#using-a-generated-world-in-the-tcr-simulation). | <img src="docs/modes/corridor.png" width="230"> |
+| [**BSP partition**](#bsp-partition) | `layout_mode: partition`<br>`partition_method: bsp` | Recursive axis-aligned splits into rooms, gates and routed passages. The general-purpose mode. | **Everything that runs today.** Exploration (`bsp_rooms`, room-count axis; `bsp_rooms_fixed_area`, AUT-185) and both random narrow-passage scenarios (`two_room_gate`, `two_room_corner` — 2-room BSP worlds despite the names). | <img src="docs/modes/bsp.gif" width="230"> |
+| [**Voronoi partition**](#voronoi-partition) | `layout_mode: partition`<br>`partition_method: voronoi` | Lloyd-relaxed Voronoi cells — non-orthogonal rooms and angled walls. | **None — do not use yet.** Leftover space exports as OBJ meshes with absolute `file://` URIs, which a containerized sim cannot resolve. AUT-144 open; never validated in Gazebo or a trial. | <img src="docs/modes/voronoi.gif" width="230"> |
+| [**Two-room gate**](#two-room-gate) | `layout_mode: two_room_gate` | Two fixed square rooms sharing a divider with one centred gate. Geometry is exact, not sampled. | `narrow_passage_fixed_gate` (config `two_room_gate_fixed`) — the deterministic gate-width axis, where a random layout would confound the measurement. | <img src="docs/modes/two_room_gate.gif" width="230"> |
+| [**Two-room corner**](#two-room-corner) | `layout_mode: two_room_corner` | Two fixed rooms joined by an L-shaped passage of two independently-sized legs. | `narrow_passage_fixed_corner` (config `two_room_corner_fixed`) — the deterministic corner-width axis. | <img src="docs/modes/two_room_corner.gif" width="230"> |
+| [**Corridor**](#corridor) | `layout_mode: corridor` | A fixed-length corridor with rooms tiled along both sides, one entrance each — plus restroom fixtures, textures, point lighting and ODE physics. | **None.** The only mode with fixtures, and the one used for hand-installed TCR sim worlds — see [Using a generated world in the TCR simulation](#using-a-generated-world-in-the-tcr-simulation). | <img src="docs/modes/corridor.gif" width="230"> |
 
-Previews are `debug/10_final_floorplan.png` for the four partition/two-room modes and
-`debug/12_fixtures.png` for corridor, from the commands in each chapter. Green = rooms,
-blue = passages, orange = gates, dark grey = unused solid fill.
+Each preview is that mode's `debug/stages.gif` — the pipeline explaining itself, one
+second per stage — produced by the `--animate` command in its own chapter. Green = rooms,
+blue = passages, orange = gates, dark grey = unused solid fill. The frame count differs
+per mode because [the animation drops stages the mode never ran](#stage-animation).
 
 **Fixtures exist in exactly one shape.** `fixture_mode: restroom_clusters` is the only
 non-`none` value there is, and only [`configs/corridor.yaml`](configs/corridor.yaml)
@@ -71,8 +72,8 @@ connect, and unused cells become routed passages or solid fill.
 uv run python -m random_gazebo_world.cli generate \
   --config configs/default.yaml \
   --seed 42 \
-  --out outputs/readme_bsp
-# preview: outputs/readme_bsp/debug/10_final_floorplan.png
+  --out outputs/readme_bsp --animate
+# preview: outputs/readme_bsp/debug/stages.gif
 ```
 
 | Key | Effect |
@@ -100,8 +101,8 @@ relaxed by `voronoi_lloyd_iterations` of Lloyd's algorithm, keeping cells within
 uv run python -m random_gazebo_world.cli generate \
   --config configs/voronoi.yaml \
   --seed 42 \
-  --out outputs/readme_voronoi
-# preview: outputs/readme_voronoi/debug/10_final_floorplan.png
+  --out outputs/readme_voronoi --animate
+# preview: outputs/readme_voronoi/debug/stages.gif
 ```
 
 **Do not use this mode for measurements yet — AUT-144 is open.** What is actually true as
@@ -132,8 +133,8 @@ give the same walls to the millimetre, and the seed only moves the start/goal ji
 uv run python -m random_gazebo_world.cli generate \
   --config configs/two_room_gate.yaml \
   --seed 42 \
-  --out outputs/readme_two_room_gate
-# preview: outputs/readme_two_room_gate/debug/10_final_floorplan.png
+  --out outputs/readme_two_room_gate --animate
+# preview: outputs/readme_two_room_gate/debug/stages.gif
 ```
 
 | Key | Effect |
@@ -157,8 +158,8 @@ right-angle turn between two constrictions rather than drive straight through on
 uv run python -m random_gazebo_world.cli generate \
   --config configs/two_room_corner.yaml \
   --seed 42 \
-  --out outputs/readme_two_room_corner
-# preview: outputs/readme_two_room_corner/debug/10_final_floorplan.png
+  --out outputs/readme_two_room_corner --animate
+# preview: outputs/readme_two_room_corner/debug/stages.gif
 ```
 
 | Key | Effect |
@@ -182,8 +183,8 @@ physics, and the only one that goes into the TCR sim by hand.
 uv run python -m random_gazebo_world.cli generate \
   --config configs/corridor.yaml \
   --seed 4242 \
-  --out outputs/readme_corridor
-# preview: outputs/readme_corridor/debug/12_fixtures.png
+  --out outputs/readme_corridor --animate
+# preview: outputs/readme_corridor/debug/stages.gif
 ```
 
 [`configs/corridor.yaml`](configs/corridor.yaml) is the reference config. Copy it and
@@ -370,7 +371,48 @@ Staged images under `debug/`. All stages except `09_occupancy_map_preview` produ
 | `09_occupancy_map_preview` | Nav2 map preview (PNG only) | Free space for Nav2 and robot spawn selection. |
 | `10_final_floorplan` | Composite floorplan | Overall layout; pick spawn coordinates in world frame. **The preview for every mode except corridor.** |
 | `11_passage_geometry` | Corridor strips and solid leftovers | Passage strip geometry and solid fills. |
-| `12_fixtures` | Restroom clusters, cubicle outlines, fixture markers | Fixture cluster placement — **the corridor preview**; an empty overlay when fixtures are disabled. |
+| `12_fixtures` | Restroom clusters, cubicle outlines, fixture markers | Fixture cluster placement; an empty overlay when fixtures are disabled. |
+
+### Stage animation
+
+`--animate` composes the stage PNGs into one flipbook GIF at `debug/stages.gif` — the
+mode previews in [Modes](#modes) are exactly this file.
+
+```bash
+uv run python -m random_gazebo_world.cli generate \
+  --config configs/corridor.yaml --seed 4242 --out outputs/readme_corridor \
+  --animate --animate-fps 2
+```
+
+```yaml
+debug_animation: false         # off by default — see below
+debug_animation_fps: 1.0       # frames per second; --animate-fps overrides
+debug_animation_max_px: 600    # longest edge per frame
+```
+
+`--animate-fps` implies `--animate`. Rendering is unchanged either way: all twelve stage
+images are still written, and the animation only *selects* among them, so nothing that
+reads `debug/` needs to know this feature exists.
+
+**Three stages are dropped, and the rule is per world, not per mode:**
+
+| Dropped | When | Why |
+| --- | --- | --- |
+| `09_occupancy_map_preview` | always | It is the Nav2 raster at map resolution — 400×400, 480×394 and 170×80 on three worlds measured — not a 1200×1200 figure. Letterboxing it in is the only way, and `10_final_floorplan` already shows the same free space in the world frame. |
+| `03_cell_adjacency_graph`, `04_candidate_connections`, `05_selected_room_graph` | `layout_mode != partition` | Corridor and both two-room modes build geometry directly and never run selection. They still render these frames: corridor's `04` shows the finished corridor under the title *"Candidate Connections"*, which is worse than a missing frame. |
+| `12_fixtures` | `fixture_mode: none` | An empty plot titled "Fixtures". Gated on the **config**, not the mode, because `bsp` + `restroom_clusters` is legal and places real clusters. |
+| `11_passage_geometry` | no passage strips in the layout | Corridor mode uses the whole corridor cell polygon, so there is nothing to draw. |
+
+Which lands at 10 frames for bsp and voronoi, 8 for corridor, 7 for the two-room modes.
+
+**Default off is deliberate.** Autotuner materializes one world per trial, and a campaign
+is thousands of trials; a few hundred KB of GIF in every `env/` that nobody opens is real
+disk for no reader. Turn it on per run for docs and demos.
+
+No alignment work is involved: `visualize._setup_axes` pins every figure's axes to the
+world bounds, so the frames are already pixel-registered, and each carries its own
+matplotlib title — no overlays, no fonts. Frames are palettized per frame, which on flat
+matplotlib figures is lossless in practice; the five previews in this README total ~1 MB.
 
 ## Validate and view in Gazebo
 
@@ -584,6 +626,9 @@ partition mode and receive built-in defaults; each mode's own keys are required.
 | `scene_ambient` | `[0.28, 0.28, 0.28]` | World scene ambient RGB. |
 | `scene_background` | `[0.7, 0.7, 0.7]` | World scene background RGB. |
 | `physics_profile` | `ignored` | `ignored` or `ode` (ODE plugins and solver settings). |
+| `debug_animation` | `false` | Compose `debug/stages.gif` from the stage images. `--animate` overrides. |
+| `debug_animation_fps` | `1.0` | Animation frame rate. `--animate-fps` overrides. |
+| `debug_animation_max_px` | `600` | Longest edge of each animation frame in pixels. |
 | `counter_specular` | `[0.4, 0.4, 0.4]` | RGB specular for counter-top fixture visuals. |
 | `fixture_friction_mu` | `10000.2` | ODE friction `mu`/`mu2` for counter and cabinet collisions. |
 
@@ -596,7 +641,7 @@ change fixture logical world poses or collision boxes.
 | --- | --- |
 | `random_gazebo_world/` | Generator package: partitioning, topology, openings, walls, maps, SDF export. |
 | `configs/` | One reference config per mode. |
-| `docs/modes/` | Mode preview images used by this README. |
+| `docs/modes/` | Per-mode `stages.gif` previews used by this README. |
 | `tests/` | Unit tests for geometry, topology, map/SDF export, and config behavior. |
 | `demo/` | Automated Gazebo + Nav2 benchmark pipeline. |
 | `outputs/` | Default local output area for generated worlds (gitignored). |

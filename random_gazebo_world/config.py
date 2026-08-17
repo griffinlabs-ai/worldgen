@@ -98,6 +98,12 @@ class Config:
     min_free_area_m2: float | None = None
     max_free_area_m2: float | None = None
     room_count_world_size: dict[int, float] | None = None
+    # Off by default on purpose: autotuner materializes one world per trial, and a
+    # few MB of GIF in every trial's env/ that nobody opens adds up over a campaign.
+    # Turn it on for docs and demos, per run, with --animate.
+    debug_animation: bool = False
+    debug_animation_fps: float = 1.0
+    debug_animation_max_px: int = 600
 
     @property
     def fixture_models_path(self) -> Path | None:
@@ -112,6 +118,7 @@ class Config:
         return Path(self.fixture_models_dir).expanduser()
 
     def validate(self) -> None:
+        self._validate_debug_animation()
         if self.layout_mode not in (
             "partition",
             "corridor",
@@ -136,6 +143,15 @@ class Config:
             return
         self._validate_partition_mode()
         self._validate_fixture_settings()
+
+    def _validate_debug_animation(self) -> None:
+        if not isinstance(self.debug_animation, bool):
+            raise ConfigError(
+                f"debug_animation must be a bool, got {self.debug_animation!r}"
+            )
+        _require_finite_number(self.debug_animation_fps, "debug_animation_fps")
+        _require_positive(self.debug_animation_fps, "debug_animation_fps")
+        _require_positive_int(self.debug_animation_max_px, "debug_animation_max_px")
 
     def _validate_partition_mode(self) -> None:
         _require_positive(self.world_width, "world_width")
@@ -549,6 +565,9 @@ def load_config(path: Path | str) -> Config:
             min_free_area_m2=raw.get("min_free_area_m2"),
             max_free_area_m2=raw.get("max_free_area_m2"),
             room_count_world_size=_load_room_count_world_size(raw),
+            debug_animation=raw.get("debug_animation", False),
+            debug_animation_fps=raw.get("debug_animation_fps", 1.0),
+            debug_animation_max_px=raw.get("debug_animation_max_px", 600),
         )
     except KeyError as exc:
         raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc

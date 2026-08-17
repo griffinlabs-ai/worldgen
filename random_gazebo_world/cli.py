@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 from random_gazebo_world.config import load_config
@@ -40,6 +41,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Treat feasibility warnings as errors.",
     )
     generate.add_argument(
+        "--animate",
+        action="store_true",
+        help="Also compose debug/stages.gif from the staged debug images.",
+    )
+    generate.add_argument(
+        "--animate-fps",
+        type=float,
+        default=None,
+        help="Animation frame rate. Implies --animate. Defaults to config "
+        "debug_animation_fps (1.0).",
+    )
+    generate.add_argument(
         "--debug-retries",
         action="store_true",
         help="Print periodic retry diagnostics to stderr.",
@@ -75,6 +88,17 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(args.config)
         if args.seed is not None:
             config = config.with_seed(args.seed)
+        if args.animate or args.animate_fps is not None:
+            config = replace(
+                config,
+                debug_animation=True,
+                debug_animation_fps=(
+                    args.animate_fps
+                    if args.animate_fps is not None
+                    else config.debug_animation_fps
+                ),
+            )
+            config.validate()
         enforce_feasibility(config, strict=args.strict_config)
         generate_world(
             config,

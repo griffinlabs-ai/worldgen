@@ -12,6 +12,7 @@ from typing import Callable, TypeVar
 import networkx as nx
 
 from random_gazebo_world.adjacency import AdjacencyGraph, build_adjacency_graph
+from random_gazebo_world.animate import animation_stages, write_stage_animation
 from random_gazebo_world.config import Config
 from random_gazebo_world.corridor import CorridorError, generate_corridor_layout
 from random_gazebo_world.two_room import (
@@ -418,6 +419,19 @@ def write_world_outputs(world: GeneratedWorld, out_dir: Path) -> None:
         world.fixture_layout,
         debug_dir / "12_fixtures",
     )
+
+    if world.config.debug_animation:
+        write_stage_animation(
+            debug_dir,
+            animation_stages(
+                REQUIRED_DEBUG_STAGES,
+                world.config,
+                world.wall_layout,
+                world.fixture_layout,
+            ),
+            fps=world.config.debug_animation_fps,
+            max_px=world.config.debug_animation_max_px,
+        )
 
     _validate_output_tree(out_dir)
 
